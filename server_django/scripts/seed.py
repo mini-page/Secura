@@ -13,6 +13,7 @@ from apps.files.models import StoredFile
 from apps.files.crypto import encrypt_bytes
 from uuid import uuid4
 import os
+import hashlib
 
 ADMIN_EMAIL = os.getenv('SEED_ADMIN_EMAIL') or 'admin@secura.local'
 ADMIN_PASSWORD = os.getenv('SEED_ADMIN_PASSWORD') or ''
@@ -46,6 +47,8 @@ def seed_files_for_user(user, count=2):
     ]
     for name, raw in samples[:count]:
         file_id = uuid4()
+        logical_id = uuid4()
+        checksum = hashlib.sha256(raw).hexdigest()
         storage_name = f"{file_id}.bin"
         storage_path = os.path.join(settings.STORAGE_DIR, storage_name)
         encrypted = encrypt_bytes(raw)
@@ -53,10 +56,13 @@ def seed_files_for_user(user, count=2):
             handle.write(encrypted)
         StoredFile.objects.create(
             id=file_id,
+            logical_id=logical_id,
             owner=user,
             original_name=name,
             storage_path=storage_path,
-            size_bytes=len(raw)
+            size_bytes=len(raw),
+            version=1,
+            checksum=checksum
         )
 
 

@@ -6,9 +6,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from django.utils.dateparse import parse_datetime
+import csv
+from io import StringIO
 from .models import AuditLog
 from .serializers import AuditLogSerializer
-from apps.files.models import StoredFile
+from apps.files.models import StoredFile, ShareLink
 
 
 def _is_admin(user):
@@ -19,7 +22,18 @@ def _is_admin(user):
 @permission_classes([IsAuthenticated])
 def activity(request):
     logs = AuditLog.objects.filter(user=request.user)
-    return Response(AuditLogSerializer(logs, many=True).data)
+    page = int(request.query_params.get('page', '1'))
+    page_size = int(request.query_params.get('page_size', '50'))
+    start = (page - 1) * page_size
+    end = start + page_size
+    total = logs.count()
+    payload = {
+        'items': AuditLogSerializer(logs[start:end], many=True).data,
+        'page': page,
+        'page_size': page_size,
+        'total': total
+    }
+    return Response(payload)
 
 
 @api_view(['GET'])
@@ -28,7 +42,18 @@ def admin_audit(request):
     if not _is_admin(request.user):
         return Response({'detail': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
     logs = AuditLog.objects.all()
-    return Response(AuditLogSerializer(logs, many=True).data)
+    page = int(request.query_params.get('page', '1'))
+    page_size = int(request.query_params.get('page_size', '50'))
+    start = (page - 1) * page_size
+    end = start + page_size
+    total = logs.count()
+    payload = {
+        'items': AuditLogSerializer(logs[start:end], many=True).data,
+        'page': page,
+        'page_size': page_size,
+        'total': total
+    }
+    return Response(payload)
 
 
 @api_view(['GET'])
@@ -46,6 +71,59 @@ def admin_users(request):
         for user in User.objects.all()
     ]
     return Response(payload)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_summary(request):
+    if not _is_admin(request.user):
+        return Response({'detail': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
+    users_count = User.objects.count()
+    files_count = StoredFile.objects.count()
+    uploads = AuditLog.objects.filter(action='UPLOAD_FILE').count()
+    downloads = AuditLog.objects.filter(action='DOWNLOAD_FILE').count()
+    payload = {
+        'users': users_count,
+        'files': files_count,
+        'uploads': uploads,
+        'downloads': downloads
+    }
+    return Response(payload)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_shares(request):
+    if not _is_admin(request.user):
+        return Response({'detail': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
+    shares = ShareLink.objects.select_related('file', 'created_by').all()
+    payload = [
+        {
+            'token': share.token,
+            'fileId': str(share.file.id),
+            'fileName': share.file.original_name,
+            'owner': share.file.owner.email,
+            'createdBy': share.created_by.email,
+            'createdAt': share.created_at,
+            'expiresAt': share.expires_at
+        }
+        for share in shares
+    ]
+    return Response(payload)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_csv(request):
+    logs = AuditLog.objects.filter(user=request.user)
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['id', 'action', 'timestamp', 'ip'])
+    for log in logs:
+        writer.writerow([log.id, log.action, log.timestamp.isoformat(), log.ip])
+    response = Response(output.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="audit.csv"'
+    return response
 
 
 @api_view(['GET'])

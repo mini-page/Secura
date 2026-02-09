@@ -29,16 +29,38 @@ export function guestLogin() {
   return request("/auth/guest", { method: "POST" });
 }
 
-export function fetchFiles(token) {
-  return request("/files", { headers: { Authorization: `Bearer ${token}` } });
+export function fetchFiles(token, page = 1, pageSize = 50) {
+  return request(`/files?page=${page}&page_size=${pageSize}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
 }
 
-export function fetchActivity(token) {
-  return request("/activity", { headers: { Authorization: `Bearer ${token}` } });
+export function fetchActivity(token, page = 1, pageSize = 50) {
+  return request(`/activity?page=${page}&page_size=${pageSize}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
 }
 
 export function fetchAnalytics(token) {
   return request("/analytics/summary", { headers: { Authorization: `Bearer ${token}` } });
+}
+
+export async function exportAuditCsv(token) {
+  const res = await fetch(`${API_BASE}/activity/export`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) {
+    throw new Error("Export failed");
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "audit.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export function uploadFileWithProgress(token, file, onProgress) {
@@ -97,5 +119,39 @@ export function fetchAdminUsers(token) {
 }
 
 export function fetchAdminAudit(token) {
-  return request("/admin-api/audit", { headers: { Authorization: `Bearer ${token}` } });
+  return request("/admin-api/audit?page=1&page_size=50", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export function createShareLink(token, fileId, expiresMinutes = 1440) {
+  return request(`/files/${fileId}/share`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ expires_minutes: expiresMinutes })
+  });
+}
+
+export function fetchShareLinks(token, fileId) {
+  return request(`/files/${fileId}/shares`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export function revokeShareLink(token, shareToken) {
+  return request(`/files/share/${shareToken}/revoke`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export function fetchAdminSummary(token) {
+  return request("/admin-api/summary", { headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function fetchAdminShares(token) {
+  return request("/admin-api/shares", { headers: { Authorization: `Bearer ${token}` } });
 }

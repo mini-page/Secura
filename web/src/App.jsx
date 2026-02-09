@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  API_BASE,
   downloadFile,
+  createShareLink,
+  fetchShareLinks,
+  revokeShareLink,
   fetchActivity,
   fetchAdminAudit,
   fetchAdminUsers,
+  fetchAdminShares,
+  fetchAdminSummary,
   fetchAnalytics,
   fetchFiles,
+  exportAuditCsv,
   guestLogin,
   login,
   register,
@@ -34,6 +41,8 @@ const themeOptions = ["system", "light", "dark"];
 
 export default function App() {
   const [state, setState] = useState(initialState);
+  const [adminSummary, setAdminSummary] = useState(null);
+  const [adminShares, setAdminShares] = useState([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("login");
@@ -44,6 +53,11 @@ export default function App() {
   const [encryptingName, setEncryptingName] = useState("");
   const [uploadComplete, setUploadComplete] = useState("");
   const [analytics, setAnalytics] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [favorites, setFavorites] = useState({});
+  const [fileTags, setFileTags] = useState({});
+  const [page, setPage] = useState(1);
+  const pageSize = 6;
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("recent");
   const [activityQuery, setActivityQuery] = useState("");
@@ -53,6 +67,10 @@ export default function App() {
   const [fabOpen, setFabOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [activeFile, setActiveFile] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [shareLinks, setShareLinks] = useState([]);
+  const [shareLoading, setShareLoading] = useState(false);
   const [settings, setSettings] = useState({
     autoLock: true,
     biometrics: false,
@@ -70,6 +88,8 @@ export default function App() {
     const saved = localStorage.getItem(STORAGE_KEY);
     const savedTheme = localStorage.getItem(THEME_KEY);
     const seenSplash = localStorage.getItem(SPLASH_KEY) === "1";
+    const savedFavorites = localStorage.getItem("secura_web_favorites");
+    const savedTags = localStorage.getItem("secura_web_tags");
     if (savedTheme && themeOptions.includes(savedTheme)) {
       setTheme(savedTheme);
     }
@@ -85,6 +105,20 @@ export default function App() {
     }
     if (seenSplash) {
       setShowSplash(false);
+    }
+    if (savedFavorites) {
+      try {
+        setFavorites(JSON.parse(savedFavorites));
+      } catch {
+        localStorage.removeItem("secura_web_favorites");
+      }
+    }
+    if (savedTags) {
+      try {
+        setFileTags(JSON.parse(savedTags));
+      } catch {
+        localStorage.removeItem("secura_web_tags");
+      }
     }
   }, []);
 
@@ -106,6 +140,14 @@ export default function App() {
       root.dataset.theme = theme;
     }
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem("secura_web_favorites", JSON.stringify(favorites));
+  }, [favorites]);
+
+  useEffect(() => {
+    localStorage.setItem("secura_web_tags", JSON.stringify(fileTags));
+  }, [fileTags]);
 
 
   function readLocalFiles() {
@@ -183,6 +225,14 @@ export default function App() {
     setPassword("");
   }
 
+  function pushToast(message, type = "info") {
+    const id = newId();
+    setToasts((list) => [...list, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((list) => list.filter((toast) => toast.id !== id));
+    }, 2800);
+  }
+
   async function loadFiles() {
     if (isDemo()) {
       const localFiles = readLocalFiles();
@@ -192,7 +242,8 @@ export default function App() {
     setState((s) => ({ ...s, loading: true, error: "" }));
     try {
       const data = await fetchFiles(state.token);
-      setState((s) => ({ ...s, files: data, loading: false }));
+      const items = Array.isArray(data) ? data : data.items || [];
+      setState((s) => ({ ...s, files: items, loading: false }));
     } catch (err) {
       const localFiles = readLocalFiles();
       setState((s) => ({ ...s, files: localFiles, loading: false, error: err.message }));
@@ -208,7 +259,8 @@ export default function App() {
     setState((s) => ({ ...s, loading: true, error: "" }));
     try {
       const data = await fetchActivity(state.token);
-      setState((s) => ({ ...s, activity: data, loading: false }));
+      const items = Array.isArray(data) ? data : data.items || [];
+      setState((s) => ({ ...s, activity: items, loading: false }));
     } catch (err) {
       const localLogs = readLocalActivity();
       setState((s) => ({ ...s, activity: localLogs, loading: false, error: err.message }));
@@ -228,8 +280,7 @@ export default function App() {
     }
   }
 
-  async function handleUpload(event) {
-    const file = event.target.files?.[0];
+  async function handleFileUpload(file) {
     if (!file) return;
     setUploading(true);
     setUploadProgress(0);
@@ -267,7 +318,7 @@ export default function App() {
         setUploadStage("Idle");
         setEncryptingName("");
       }, 1700);
-      event.target.value = "";
+      pushToast("File uploaded (demo mode).", "success");
       return;
     }
 
@@ -280,20 +331,39 @@ export default function App() {
       setTimeout(() => setUploadComplete(""), 1400);
       setState((s) => ({ ...s, notice: "Upload complete." }));
       await loadFiles();
+      pushToast("Upload complete.", "success");
     } catch (err) {
       setState((s) => ({ ...s, error: err.message }));
+      pushToast(err.message || "Upload failed.", "error");
     } finally {
       setUploading(false);
       setUploadProgress(0);
       setUploadStage("Idle");
       setEncryptingName("");
-      event.target.value = "";
     }
+  }
+
+  function handleUpload(event) {
+    const file = event.target.files?.[0];
+    handleFileUpload(file);
+    event.target.value = "";
   }
 
   function openDetail(file) {
     setActiveFile(file);
     setDetailOpen(true);
+    if (state.token && state.token !== "offline-guest") {
+      loadShares(file.fileId);
+    }
+  }
+
+  function handleDrop(event) {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+      handleFileUpload(file);
+    }
   }
 
   async function handleDownloadWeb(file) {
@@ -302,12 +372,79 @@ export default function App() {
       logs.unshift({ id: newId(), action: "DOWNLOAD_FILE", timestamp: new Date().toISOString() });
       writeLocalActivity(logs);
       setState((s) => ({ ...s, activity: logs, notice: "Download ready (demo mode)." }));
+      pushToast(`Prepared ${file.originalName}`, "info");
       return;
     }
     try {
       await downloadFile(state.token, file.fileId, file.originalName);
+      pushToast(`Downloaded ${file.originalName}`, "success");
     } catch (err) {
       setState((s) => ({ ...s, error: err.message }));
+      pushToast(err.message || "Download failed.", "error");
+    }
+  }
+
+  function toggleFavorite(fileId) {
+    setFavorites((prev) => ({ ...prev, [fileId]: !prev[fileId] }));
+  }
+
+  function addTag(fileId, tag) {
+    const cleaned = tag.trim();
+    if (!cleaned) return;
+    setFileTags((prev) => {
+      const current = prev[fileId] || [];
+      if (current.includes(cleaned)) return prev;
+      return { ...prev, [fileId]: [...current, cleaned] };
+    });
+  }
+
+  function removeTag(fileId, tag) {
+    setFileTags((prev) => ({
+      ...prev,
+      [fileId]: (prev[fileId] || []).filter((item) => item !== tag)
+    }));
+  }
+
+  async function handleShare(file) {
+    if (isDemo()) {
+      pushToast("Share links require a backend session.", "info");
+      return;
+    }
+    try {
+      const data = await createShareLink(state.token, file.fileId);
+      const base = API_BASE.startsWith("http") ? API_BASE : `${window.location.origin}${API_BASE}`;
+      const absolute = `${base}${data.shareUrl}`;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(absolute);
+        pushToast("Share link copied.", "success");
+      } else {
+        window.prompt("Copy share link:", absolute);
+      }
+      await loadShares(file.fileId);
+    } catch (err) {
+      pushToast(err.message || "Share failed.", "error");
+    }
+  }
+
+  async function loadShares(fileId) {
+    setShareLoading(true);
+    try {
+      const data = await fetchShareLinks(state.token, fileId);
+      setShareLinks(data);
+    } catch {
+      setShareLinks([]);
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  async function handleRevokeShare(token) {
+    try {
+      await revokeShareLink(state.token, token);
+      setShareLinks((links) => links.filter((item) => item.token !== token));
+      pushToast("Share link revoked.", "info");
+    } catch (err) {
+      pushToast(err.message || "Revoke failed.", "error");
     }
   }
 
@@ -315,11 +452,16 @@ export default function App() {
     if (!state.token || !isAdmin) return;
     setState((s) => ({ ...s, loading: true, error: "" }));
     try {
-      const [users, logs] = await Promise.all([
+      const [users, logs, summary, shares] = await Promise.all([
         fetchAdminUsers(state.token),
-        fetchAdminAudit(state.token)
+        fetchAdminAudit(state.token),
+        fetchAdminSummary(state.token),
+        fetchAdminShares(state.token)
       ]);
-      setState((s) => ({ ...s, adminUsers: users, adminLogs: logs, loading: false }));
+      const logItems = Array.isArray(logs) ? logs : logs.items || [];
+      setState((s) => ({ ...s, adminUsers: users, adminLogs: logItems, loading: false }));
+      setAdminSummary(summary);
+      setAdminShares(shares || []);
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: err.message }));
     }
@@ -347,7 +489,12 @@ export default function App() {
 
   const filteredFiles = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    const list = state.files.filter((file) => file.originalName.toLowerCase().includes(normalized));
+    const list = state.files.filter((file) => {
+      const nameMatch = file.originalName.toLowerCase().includes(normalized);
+      const tags = fileTags[file.fileId] || [];
+      const tagMatch = tags.some((tag) => tag.toLowerCase().includes(normalized));
+      return nameMatch || tagMatch;
+    });
     if (sortBy === "name") {
       return [...list].sort((a, b) => a.originalName.localeCompare(b.originalName));
     }
@@ -357,6 +504,10 @@ export default function App() {
     return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [state.files, query, sortBy]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [query, sortBy, state.files.length]);
+
   const parsedActivity = useMemo(() => {
     return state.activity.map((log) => {
       const action = log.action || "";
@@ -364,6 +515,8 @@ export default function App() {
         ? "upload"
         : action.includes("DOWNLOAD")
           ? "download"
+          : action.includes("SHARE")
+            ? "share"
           : action.includes("LOGIN") || action.includes("REGISTER")
             ? "login"
             : "other";
@@ -375,6 +528,12 @@ export default function App() {
             ? "Uploaded a file"
             : action === "DOWNLOAD_FILE"
               ? "Downloaded a file"
+              : action === "SHARE_CREATED"
+                ? "Created a share link"
+                : action === "SHARE_DOWNLOADED"
+                  ? "Shared link downloaded"
+                  : action === "SHARE_REVOKED"
+                    ? "Revoked a share link"
               : action === "LOGIN"
                 ? "Signed in to Secura"
                 : action === "REGISTER"
@@ -397,6 +556,8 @@ export default function App() {
   const chartHeights = analyticsSeries.map((item) =>
     Math.round(((item.uploads || 0) / maxUploads) * 100)
   );
+  const totalPages = Math.max(1, Math.ceil(filteredFiles.length / pageSize));
+  const pagedFiles = filteredFiles.slice((page - 1) * pageSize, page * pageSize);
   const totalBytes = useMemo(
     () => state.files.reduce((sum, file) => sum + (file.sizeBytes || 0), 0),
     [state.files]
@@ -492,6 +653,87 @@ export default function App() {
     return "FILE";
   }
 
+  function Icon({ name }) {
+    const common = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none" };
+    const stroke = { stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
+    switch (name) {
+      case "upload":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M12 16V4" />
+            <path {...stroke} d="M8 8l4-4 4 4" />
+            <path {...stroke} d="M20 16v4H4v-4" />
+          </svg>
+        );
+      case "download":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M12 4v12" />
+            <path {...stroke} d="M8 12l4 4 4-4" />
+            <path {...stroke} d="M20 20H4" />
+          </svg>
+        );
+      case "refresh":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M21 12a9 9 0 1 1-3.3-6.9" />
+            <path {...stroke} d="M21 3v6h-6" />
+          </svg>
+        );
+      case "files":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M4 7h6l2 2h8v8a2 2 0 0 1-2 2H4z" />
+            <path {...stroke} d="M4 7V5a2 2 0 0 1 2-2h4l2 2h8" />
+          </svg>
+        );
+      case "activity":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M4 14l4-4 4 4 4-6 4 6" />
+          </svg>
+        );
+      case "settings":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+            <path {...stroke} d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+          </svg>
+        );
+      case "user":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle {...stroke} cx="12" cy="7" r="4" />
+          </svg>
+        );
+      case "admin":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M12 2l7 4v6c0 5-3 9-7 10-4-1-7-5-7-10V6l7-4z" />
+          </svg>
+        );
+      case "export":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M12 16V4" />
+            <path {...stroke} d="M8 8l4-4 4 4" />
+            <path {...stroke} d="M4 20h16" />
+          </svg>
+        );
+      case "share":
+        return (
+          <svg {...common}>
+            <path {...stroke} d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+            <path {...stroke} d="M12 3v12" />
+            <path {...stroke} d="M8 7l4-4 4 4" />
+          </svg>
+        );
+      default:
+        return null;
+    }
+  }
+
   return (
     <div className="page">
       {showSplash ? (
@@ -558,7 +800,7 @@ export default function App() {
                     className={mode === tab.key ? "tab active" : "tab"}
                     onClick={() => setMode(tab.key)}
                   >
-                    {tab.label}
+                    <span className="icon"><Icon name={tab.icon} /></span>{tab.label}
                   </button>
                 ))}
               </div>
@@ -596,7 +838,16 @@ export default function App() {
       ) : null}
 
       {activeTab === "files" ? (
-        <section className="panel files panel-animate">
+        <section
+          className={dragActive ? "panel files panel-animate drag-active" : "panel files panel-animate"}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragActive(true);
+          }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={handleDrop}
+        >
+          {dragActive ? <div className="drop-hint">Drop file to encrypt + upload</div> : null}
           <div className="blob blob-one" />
           <div className="blob blob-two" />
           <div className="blob blob-three" />
@@ -607,6 +858,7 @@ export default function App() {
             </div>
             <div className="button-row">
               <label className="upload-btn">
+                <span className="icon"><Icon name="upload" /></span>
                 {uploading ? "Uploading..." : "Upload file"}
                 <input
                   type="file"
@@ -615,7 +867,10 @@ export default function App() {
                   ref={uploadInputRef}
                 />
               </label>
-              <button className="ghost" onClick={loadFiles} disabled={uploading}>Refresh</button>
+              <button className="ghost" onClick={loadFiles} disabled={uploading}>
+                <span className="icon"><Icon name="refresh" /></span>
+                Refresh
+              </button>
             </div>
           </div>
 
@@ -630,6 +885,20 @@ export default function App() {
               <div className="usage-fill" style={{ width: `${Math.round(usageRatio * 100)}%` }} />
             </div>
             <span className="muted">Last sync {new Date().toLocaleTimeString()}</span>
+
+            {recentFiles.length > 0 ? (
+              <div className="recent-inline">
+                <div className="recent-inline-title">Recent uploads</div>
+                <div className="recent-inline-list">
+                  {recentFiles.map((file) => (
+                    <div key={file.fileId} className="recent-inline-item">
+                      <span>{file.originalName}</span>
+                      <span className="muted">{(file.sizeBytes / 1024).toFixed(1)} KB</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="overview-grid">
@@ -737,29 +1006,69 @@ export default function App() {
           {uploadComplete ? <div className="notice">{uploadComplete}</div> : null}
 
           <div className="file-grid">
-            {filteredFiles.length === 0 ? (
+            {pagedFiles.length === 0 ? (
               <div className="empty">
                 <div className="empty-icon">UP</div>
                 <div>No files yet. Upload from web or mobile.</div>
               </div>
             ) : (
-              filteredFiles.map((file) => (
-                <div key={file.fileId} className="file-card">
+              pagedFiles.map((file) => (
+                <div
+                  key={file.fileId}
+                  className="file-card clickable"
+                  onClick={() => openDetail(file)}
+                >
                   <div className="file-title">
                     <span className="file-icon">{fileIcon(file.originalName)}</span>
                     {file.originalName}
                   </div>
+                  <button
+                    className="fav-btn"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleFavorite(file.fileId);
+                    }}
+                  >
+                    {favorites[file.fileId] ? "★" : "☆"}
+                  </button>
                   <div className="file-meta">{(file.sizeBytes / 1024).toFixed(1)} KB</div>
-                  <div className="file-meta">{new Date(file.createdAt).toLocaleString()}</div>
+                  <div className="file-meta">
+                    v{file.version || 1} • {new Date(file.createdAt).toLocaleString()}
+                  </div>
+                  <div className="tag-row">
+                    {(fileTags[file.fileId] || []).map((tag) => (
+                      <span
+                        key={tag}
+                        className="tag-chip"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          removeTag(file.fileId, tag);
+                        }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
                   <span className="chip">Encrypted</span>
-                  <div className="button-row">
-                    <button className="ghost small" onClick={() => openDetail(file)}>
-                      Details
+                  <div className="action-row">
+                    <button
+                      className="ghost small"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleShare(file);
+                      }}
+                    >
+                      <span className="icon"><Icon name="share" /></span>
+                      Share
                     </button>
                     <button
                       className="ghost small"
-                      onClick={() => handleDownloadWeb(file)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDownloadWeb(file);
+                      }}
                     >
+                      <span className="icon"><Icon name="download" /></span>
                       Download
                     </button>
                   </div>
@@ -767,30 +1076,15 @@ export default function App() {
               ))
             )}
           </div>
-
-          {recentFiles.length > 0 ? (
-            <div className="recent">
-              <h3>Recent uploads</h3>
-              <div className="recent-row recent-list">
-                {recentFiles.map((file) => (
-                  <div key={file.fileId} className="recent-card">
-                    <div>
-                      <strong>{file.originalName}</strong>
-                      <div className="muted">
-                        {(file.sizeBytes / 1024).toFixed(1)} KB · {new Date(file.createdAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                    <button
-                      className="ghost small"
-                      onClick={() => handleDownloadWeb(file)}
-                    >
-                      DL
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <div className="pagination">
+            <button className="ghost small" onClick={() => setPage(Math.max(1, page - 1))}>
+              Prev
+            </button>
+            <span className="muted">Page {page} of {totalPages}</span>
+            <button className="ghost small" onClick={() => setPage(Math.min(totalPages, page + 1))}>
+              Next
+            </button>
+          </div>
         </section>
       ) : null}
 
@@ -801,7 +1095,19 @@ export default function App() {
               <h2>Activity</h2>
               <span className="status">Audit trail</span>
             </div>
-            <button className="ghost" onClick={loadActivity}>Refresh</button>
+            <div className="button-row">
+              <button className="ghost small" onClick={loadActivity}>
+                <span className="icon"><Icon name="refresh" /></span>
+                Refresh
+              </button>
+              <button
+                className="ghost small"
+                onClick={() => exportAuditCsv(state.token).catch((err) => pushToast(err.message, "error"))}
+              >
+                <span className="icon"><Icon name="export" /></span>
+                Export CSV
+              </button>
+            </div>
           </div>
 
           <div className="overview-grid">
@@ -831,6 +1137,7 @@ export default function App() {
                 { key: "all", label: "All" },
                 { key: "upload", label: "Uploads" },
                 { key: "download", label: "Downloads" },
+                { key: "share", label: "Shares" },
                 { key: "login", label: "Logins" }
               ].map((item) => (
                 <button
@@ -1002,6 +1309,26 @@ export default function App() {
             <button className="ghost" onClick={loadAdmin}>Refresh</button>
           </div>
           {state.error ? <div className="error">{state.error}</div> : null}
+          {adminSummary ? (
+            <div className="overview-grid">
+              <div className="stat-card">
+                <p>Users</p>
+                <h3>{adminSummary.users}</h3>
+              </div>
+              <div className="stat-card">
+                <p>Files</p>
+                <h3>{adminSummary.files}</h3>
+              </div>
+              <div className="stat-card">
+                <p>Uploads</p>
+                <h3>{adminSummary.uploads}</h3>
+              </div>
+              <div className="stat-card">
+                <p>Downloads</p>
+                <h3>{adminSummary.downloads}</h3>
+              </div>
+            </div>
+          ) : null}
           <div className="admin-grid">
             <div className="admin-card">
               <h3>Users</h3>
@@ -1035,6 +1362,25 @@ export default function App() {
                 ))
               )}
             </div>
+            <div className="admin-card">
+              <h3>Active Share Links</h3>
+              {adminShares.length === 0 ? (
+                <div className="empty">No share links.</div>
+              ) : (
+                adminShares.slice(0, 8).map((share) => (
+                  <div key={share.token} className="admin-row">
+                    <div>
+                      <strong>{share.fileName}</strong>
+                      <div className="muted">
+                        Expires:{" "}
+                        {share.expiresAt ? new Date(share.expiresAt).toLocaleString() : "No expiry"}
+                      </div>
+                    </div>
+                    <span className="chip">{share.owner}</span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </section>
       ) : null}
@@ -1052,6 +1398,10 @@ export default function App() {
               <strong>{(activeFile.sizeBytes / 1024).toFixed(1)} KB</strong>
             </div>
             <div className="modal-row">
+              <span className="muted">Version</span>
+              <strong>{activeFile.version || 1}</strong>
+            </div>
+            <div className="modal-row">
               <span className="muted">Created</span>
               <strong>{new Date(activeFile.createdAt).toLocaleString()}</strong>
             </div>
@@ -1059,12 +1409,83 @@ export default function App() {
               <span className="muted">Encryption</span>
               <strong>AES-256-GCM</strong>
             </div>
+            <div className="modal-row">
+              <span className="muted">Tags</span>
+              <div className="tag-row">
+                {(fileTags[activeFile.fileId] || []).map((tag) => (
+                  <span key={tag} className="tag-chip" onClick={() => removeTag(activeFile.fileId, tag)}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="modal-row">
+              <span className="muted">Add tag</span>
+              <div className="tag-input">
+                <input
+                  value={tagInput}
+                  onChange={(event) => setTagInput(event.target.value)}
+                  placeholder="e.g. finance"
+                />
+                <button
+                  className="ghost small"
+                  onClick={() => {
+                    addTag(activeFile.fileId, tagInput);
+                    setTagInput("");
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+            <div className="modal-row">
+              <span className="muted">Shares</span>
+              <div className="share-list">
+                {shareLoading ? (
+                  <span className="muted">Loading…</span>
+                ) : shareLinks.length === 0 ? (
+                  <span className="muted">No active links</span>
+                ) : (
+                  shareLinks.map((share) => (
+                    <div key={share.token} className="share-row">
+                      <span className="muted">
+                {share.expiresAt ? `Expires ${new Date(share.expiresAt).toLocaleString()}` : "No expiry"}
+              </span>
+                      <div className="button-row">
+                        <button
+                          className="ghost small"
+                          onClick={() => {
+                            const base = API_BASE.startsWith("http")
+                              ? API_BASE
+                              : `${window.location.origin}${API_BASE}`;
+                            const link = `${base}/files/share/${share.token}`;
+                            navigator.clipboard?.writeText
+                              ? navigator.clipboard.writeText(link).then(() => pushToast("Link copied.", "success"))
+                              : window.prompt("Copy share link:", link);
+                          }}
+                        >
+                          Copy
+                        </button>
+                        <button className="ghost small" onClick={() => handleRevokeShare(share.token)}>
+                          Revoke
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
             <div className="button-row">
               <button
                 className="primary"
                 onClick={() => handleDownloadWeb(activeFile)}
               >
+                <span className="icon"><Icon name="download" /></span>
                 Download
+              </button>
+              <button className="ghost" onClick={() => handleShare(activeFile)}>
+                <span className="icon"><Icon name="share" /></span>
+                Share
               </button>
               <button className="ghost" onClick={() => setDetailOpen(false)}>
                 Close
@@ -1073,6 +1494,14 @@ export default function App() {
           </div>
         </div>
       ) : null}
+
+      <div className="toast-stack">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast ${toast.type}`} >
+            {toast.message}
+          </div>
+        ))}
+      </div>
 
       <button className={fabOpen ? "fab open" : "fab"} onClick={() => setFabOpen(true)}>
         ☰
@@ -1089,15 +1518,16 @@ export default function App() {
                 setTimeout(() => uploadInputRef.current?.click(), 80);
               }}
             >
+              <span className="icon"><Icon name="upload" /></span>
               Upload file
             </button>
             <p className="fab-section">Navigate</p>
             {[
-              { key: "files", label: "Files" },
-              { key: "activity", label: "Activity" },
-              { key: "settings", label: "Settings" },
-              { key: "overview", label: "Account" },
-              isAdmin ? { key: "admin", label: "Admin" } : null
+              { key: "files", label: "Files", icon: "files" },
+              { key: "activity", label: "Activity", icon: "activity" },
+              { key: "settings", label: "Settings", icon: "settings" },
+              { key: "overview", label: "Account", icon: "user" },
+              isAdmin ? { key: "admin", label: "Admin", icon: "admin" } : null
             ]
               .filter(Boolean)
               .map((tab) => (
@@ -1109,7 +1539,7 @@ export default function App() {
                     setFabOpen(false);
                   }}
                 >
-                  {tab.label}
+                  <span className="icon"><Icon name={tab.icon} /></span>{tab.label}
                 </button>
               ))}
           </div>
