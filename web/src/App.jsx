@@ -81,6 +81,39 @@ export default function App() {
     reduceMotion: false
   });
 
+  const team = [
+    {
+      name: "Umang Gupta",
+      role: "Team Lead",
+      focus: "Security architecture & product direction",
+      accent: "accent-sky"
+    },
+    {
+      name: "Tribhuvan Pratap Singh",
+      role: "Backend Engineer",
+      focus: "API, encryption flow, and audit trails",
+      accent: "accent-mint"
+    },
+    {
+      name: "Vineet Vikram Rao",
+      role: "Frontend Engineer",
+      focus: "UX flows, dashboards, and data clarity",
+      accent: "accent-amber"
+    },
+    {
+      name: "Vaishnavendra Dhar Dwivedi",
+      role: "Security Analyst",
+      focus: "Threat modeling and access control",
+      accent: "accent-lilac"
+    },
+    {
+      name: "Vipul Kumar",
+      role: "Platform Engineer",
+      focus: "Deployment, performance, and reliability",
+      accent: "accent-rose"
+    }
+  ];
+
   const uploadInputRef = useRef(null);
   const isAdmin = state.user?.role === "admin";
 
@@ -707,6 +740,15 @@ export default function App() {
             <circle {...stroke} cx="12" cy="7" r="4" />
           </svg>
         );
+      case "team":
+        return (
+          <svg {...common}>
+            <circle {...stroke} cx="8" cy="9" r="3" />
+            <circle {...stroke} cx="16" cy="9" r="3" />
+            <path {...stroke} d="M2 20v-1a4 4 0 0 1 4-4h4" />
+            <path {...stroke} d="M22 20v-1a4 4 0 0 0-4-4h-4" />
+          </svg>
+        );
       case "admin":
         return (
           <svg {...common}>
@@ -874,31 +916,36 @@ export default function App() {
             </div>
           </div>
 
-          <div className="usage-card">
-            <div>
-              <h3>Storage usage</h3>
-              <span className="muted">
-                {formatBytes(totalBytes)} of {formatBytes(totalQuota)}
-              </span>
-            </div>
-            <div className="usage-bar">
-              <div className="usage-fill" style={{ width: `${Math.round(usageRatio * 100)}%` }} />
-            </div>
-            <span className="muted">Last sync {new Date().toLocaleTimeString()}</span>
-
-            {recentFiles.length > 0 ? (
-              <div className="recent-inline">
-                <div className="recent-inline-title">Recent uploads</div>
-                <div className="recent-inline-list">
-                  {recentFiles.map((file) => (
-                    <div key={file.fileId} className="recent-inline-item">
-                      <span>{file.originalName}</span>
-                      <span className="muted">{(file.sizeBytes / 1024).toFixed(1)} KB</span>
-                    </div>
-                  ))}
-                </div>
+          <div className="usage-row">
+            <div className="usage-card">
+              <div>
+                <h3>Storage usage</h3>
+                <span className="muted">
+                  {formatBytes(totalBytes)} of {formatBytes(totalQuota)}
+                </span>
               </div>
-            ) : null}
+              <div className="usage-bar">
+                <div className="usage-fill" style={{ width: `${Math.round(usageRatio * 100)}%` }} />
+              </div>
+              <span className="muted">Last sync {new Date().toLocaleTimeString()}</span>
+            </div>
+            <div className="usage-card recent-card">
+              <h3>Recent uploads</h3>
+              {recentFiles.length > 0 ? (
+                <div className="recent-inline">
+                  <div className="recent-inline-list">
+                    {recentFiles.map((file) => (
+                      <div key={file.fileId} className="recent-inline-item">
+                        <span>{file.originalName}</span>
+                        <span className="muted">{(file.sizeBytes / 1024).toFixed(1)} KB</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="empty">No recent uploads yet.</div>
+              )}
+            </div>
           </div>
 
           <div className="overview-grid">
@@ -1302,6 +1349,41 @@ export default function App() {
         </section>
       ) : null}
 
+      {activeTab === "about" ? (
+        <section className="panel panel-animate">
+          <div className="panel-header">
+            <h2>About Secura</h2>
+            <span className="status">Team</span>
+          </div>
+          <p className="lead">
+            We build secure, elegant storage for everyone. This MVP highlights encryption,
+            role-aware access, and a calm experience across devices.
+          </p>
+          <div className="about-actions">
+            <a className="ghost small" href="https://github.com/mini-page" target="_blank" rel="noreferrer">
+              <span className="icon"><Icon name="share" /></span>
+              GitHub
+            </a>
+          </div>
+          <div className="team-grid">
+            {team.map((member) => (
+              <div key={member.name} className={`team-card ${member.accent}`}>
+                <div className="team-avatar">{member.name.charAt(0)}</div>
+                <div className="team-body">
+                  <h3>{member.name}</h3>
+                  <span className="team-role">{member.role}</span>
+                  <p className="muted">{member.focus}</p>
+                </div>
+                <div className="team-actions">
+                  <button className="ghost small">Profile</button>
+                  <button className="ghost small">Contact</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {activeTab === "admin" ? (
         <section className="panel admin panel-animate">
           <div className="panel-header">
@@ -1526,6 +1608,7 @@ export default function App() {
               { key: "files", label: "Files", icon: "files" },
               { key: "activity", label: "Activity", icon: "activity" },
               { key: "settings", label: "Settings", icon: "settings" },
+              { key: "about", label: "About Us", icon: "team" },
               { key: "overview", label: "Account", icon: "user" },
               isAdmin ? { key: "admin", label: "Admin", icon: "admin" } : null
             ]

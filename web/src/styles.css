@@ -390,7 +390,28 @@ body {
   border-radius: 16px;
   padding: 16px;
   border: 1px solid var(--border);
+  margin: 0;
+}
+
+.usage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
   margin: 12px 0 20px;
+}
+
+.recent-card h3 {
+  margin: 0 0 6px;
+}
+
+.recent-card .empty {
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .usage-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .usage-bar {
@@ -428,6 +449,111 @@ body {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.lead {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  margin: 0 0 18px;
+}
+
+.about-actions {
+  display: flex;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.team-card {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  overflow: hidden;
+}
+
+.team-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 60%);
+  pointer-events: none;
+}
+
+.team-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: #0b1020;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(220, 236, 255, 0.9));
+  box-shadow: 0 8px 20px rgba(13, 45, 120, 0.15);
+  z-index: 1;
+}
+
+.team-body {
+  display: grid;
+  gap: 6px;
+  z-index: 1;
+}
+
+.team-body h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.team-role {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.team-actions {
+  display: flex;
+  gap: 10px;
+  z-index: 1;
+}
+
+.team-card .muted {
+  margin: 0;
+}
+
+.accent-sky {
+  background: linear-gradient(135deg, rgba(76, 141, 255, 0.2), rgba(125, 210, 255, 0.15));
+}
+
+.accent-mint {
+  background: linear-gradient(135deg, rgba(120, 255, 212, 0.2), rgba(98, 200, 180, 0.15));
+}
+
+.accent-amber {
+  background: linear-gradient(135deg, rgba(255, 199, 109, 0.22), rgba(255, 227, 172, 0.12));
+}
+
+.accent-lilac {
+  background: linear-gradient(135deg, rgba(186, 150, 255, 0.22), rgba(210, 195, 255, 0.12));
+}
+
+.accent-rose {
+  background: linear-gradient(135deg, rgba(255, 136, 160, 0.2), rgba(255, 200, 210, 0.12));
+}
+
+@media (max-width: 700px) {
+  .team-card {
+    padding: 16px;
+  }
 }
 
 .status {
