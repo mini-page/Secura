@@ -24,7 +24,7 @@ These guidelines define the visual and interaction system for the Secure File St
 - Allow content to breathe, avoid crowding near the bottom safe area.
 - Floating Action Button is optional; avoid if a primary button fits naturally.
 
-## 4. Color System
+## 4. Color System and theme
 - Use a light theme as default; dark theme can be added later.
 - Base palette:
 - `Primary`: `#1E6FFF`
