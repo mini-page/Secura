@@ -5,6 +5,8 @@ const authRoutes = require("./routes/auth");
 const fileRoutes = require("./routes/files");
 const adminRoutes = require("./routes/admin");
 const activityRoutes = require("./routes/activity");
+const analyticsRoutes = require("./routes/analytics");
+const sharePublicRoutes = require("./routes/sharePublic");
 const { authRequired, requireAdmin } = require("./middleware/auth");
 
 const app = express();
@@ -17,9 +19,12 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/auth", authRoutes);
+// Public share download must be registered before the authenticated /files mount
+app.use("/files/share", sharePublicRoutes);
 app.use("/files", authRequired, fileRoutes);
 app.use("/activity", authRequired, activityRoutes);
-app.use("/admin", authRequired, requireAdmin, adminRoutes);
+app.use("/analytics", authRequired, analyticsRoutes);
+app.use("/admin-api", authRequired, requireAdmin, adminRoutes);
 
 app.use((err, req, res, next) => {
   const message = err?.message || "Server error";

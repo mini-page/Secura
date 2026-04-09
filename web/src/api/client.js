@@ -155,3 +155,10 @@ export function fetchAdminSummary(token) {
 export function fetchAdminShares(token) {
   return request("/admin-api/shares", { headers: { Authorization: `Bearer ${token}` } });
 }
+
+export function deleteFile(token, fileId) {
+  return request(`/files/${fileId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}

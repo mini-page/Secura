@@ -35,13 +35,25 @@ def list_files(request):
     return Response(payload)
 
 
-@api_view(['GET'])
+@api_view(['GET', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def file_detail(request, file_id):
     try:
         record = StoredFile.objects.get(id=file_id, owner=request.user)
     except StoredFile.DoesNotExist as exc:
         raise Http404 from exc
+
+    if request.method == 'DELETE':
+        storage_path = record.storage_path
+        record.delete()
+        try:
+            if os.path.exists(storage_path):
+                os.remove(storage_path)
+        except OSError:
+            pass
+        log_action(request.user, 'DELETE_FILE', request.META.get('REMOTE_ADDR'))
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     mime_type, _ = mimetypes.guess_type(record.original_name)
     payload = StoredFileSerializer(record).data
     payload['mimeType'] = mime_type or 'application/octet-stream'
@@ -102,7 +114,8 @@ def download_file(request, file_id):
     if record.checksum and digest != record.checksum:
         return Response({'detail': 'file integrity check failed'}, status=status.HTTP_409_CONFLICT)
     log_action(request.user, 'DOWNLOAD_FILE', request.META.get('REMOTE_ADDR'))
-    response = HttpResponse(raw, content_type='application/octet-stream')
+    mime_type, _ = mimetypes.guess_type(record.original_name)
+    response = HttpResponse(raw, content_type=mime_type or 'application/octet-stream')
     response['Content-Disposition'] = f'attachment; filename=\"{record.original_name}\"'
     return response
 
@@ -145,7 +158,8 @@ def download_share(request, token):
     if record.checksum and digest != record.checksum:
         return Response({'detail': 'file integrity check failed'}, status=status.HTTP_409_CONFLICT)
     log_action(record.owner, 'SHARE_DOWNLOADED', request.META.get('REMOTE_ADDR'))
-    response = HttpResponse(raw, content_type='application/octet-stream')
+    mime_type, _ = mimetypes.guess_type(record.original_name)
+    response = HttpResponse(raw, content_type=mime_type or 'application/octet-stream')
     response['Content-Disposition'] = f'attachment; filename=\"{record.original_name}\"'
     return response
 

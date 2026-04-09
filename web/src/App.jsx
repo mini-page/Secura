@@ -16,7 +16,8 @@ import {
   guestLogin,
   login,
   register,
-  uploadFileWithProgress
+  uploadFileWithProgress,
+  deleteFile
 } from "./api/client";
 
 const STORAGE_KEY = "secura_web_session";
@@ -24,6 +25,10 @@ const THEME_KEY = "secura_web_theme";
 const SPLASH_KEY = "secura_web_seen_splash";
 const LOCAL_FILES_KEY = "secura_web_files";
 const LOCAL_ACTIVITY_KEY = "secura_web_activity";
+
+// In-memory store for file blobs uploaded in demo/offline mode.
+// These are only available for the current browser session.
+const demoFileBlobs = new Map();
 
 const initialState = {
   token: "",
@@ -338,6 +343,7 @@ export default function App() {
           sizeBytes: file.size || 0,
           createdAt: new Date().toISOString()
         };
+        demoFileBlobs.set(entry.fileId, file);
         const updated = [entry, ...localFiles];
         writeLocalFiles(updated);
         const logs = readLocalActivity();
@@ -401,11 +407,24 @@ export default function App() {
 
   async function handleDownloadWeb(file) {
     if (isDemo()) {
+      const blob = demoFileBlobs.get(file.fileId);
+      if (!blob) {
+        pushToast("File content not available in this session. Re-upload to download.", "info");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.originalName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
       const logs = readLocalActivity();
       logs.unshift({ id: newId(), action: "DOWNLOAD_FILE", timestamp: new Date().toISOString() });
       writeLocalActivity(logs);
-      setState((s) => ({ ...s, activity: logs, notice: "Download ready (demo mode)." }));
-      pushToast(`Prepared ${file.originalName}`, "info");
+      setState((s) => ({ ...s, activity: logs }));
+      pushToast(`Downloaded ${file.originalName}`, "success");
       return;
     }
     try {
@@ -478,6 +497,30 @@ export default function App() {
       pushToast("Share link revoked.", "info");
     } catch (err) {
       pushToast(err.message || "Revoke failed.", "error");
+    }
+  }
+
+  async function handleDeleteFile(file) {
+    if (!window.confirm(`Delete "${file.originalName}"? This cannot be undone.`)) return;
+    if (isDemo()) {
+      demoFileBlobs.delete(file.fileId);
+      const updated = readLocalFiles().filter((f) => f.fileId !== file.fileId);
+      writeLocalFiles(updated);
+      const logs = readLocalActivity();
+      logs.unshift({ id: newId(), action: "DELETE_FILE", timestamp: new Date().toISOString() });
+      writeLocalActivity(logs);
+      setState((s) => ({ ...s, files: updated, activity: logs }));
+      if (detailOpen && activeFile?.fileId === file.fileId) setDetailOpen(false);
+      pushToast(`Deleted ${file.originalName}`, "info");
+      return;
+    }
+    try {
+      await deleteFile(state.token, file.fileId);
+      setState((s) => ({ ...s, files: s.files.filter((f) => f.fileId !== file.fileId) }));
+      if (detailOpen && activeFile?.fileId === file.fileId) setDetailOpen(false);
+      pushToast(`Deleted ${file.originalName}`, "success");
+    } catch (err) {
+      pushToast(err.message || "Delete failed.", "error");
     }
   }
 
@@ -1118,6 +1161,15 @@ export default function App() {
                       <span className="icon"><Icon name="download" /></span>
                       Download
                     </button>
+                    <button
+                      className="ghost small"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDeleteFile(file);
+                      }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))
@@ -1149,7 +1201,26 @@ export default function App() {
               </button>
               <button
                 className="ghost small"
-                onClick={() => exportAuditCsv(state.token).catch((err) => pushToast(err.message, "error"))}
+                onClick={() => {
+                  if (isDemo()) {
+                    const rows = readLocalActivity();
+                    let csv = "id,action,timestamp,ip\n";
+                    for (const row of rows) {
+                      csv += `${row.id || ""},${row.action || ""},${row.timestamp || ""},\n`;
+                    }
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = "audit.csv";
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    URL.revokeObjectURL(url);
+                  } else {
+                    exportAuditCsv(state.token).catch((err) => pushToast(err.message, "error"));
+                  }
+                }}
               >
                 <span className="icon"><Icon name="export" /></span>
                 Export CSV
@@ -1568,6 +1639,9 @@ export default function App() {
               <button className="ghost" onClick={() => handleShare(activeFile)}>
                 <span className="icon"><Icon name="share" /></span>
                 Share
+              </button>
+              <button className="ghost" onClick={() => handleDeleteFile(activeFile)}>
+                Delete
               </button>
               <button className="ghost" onClick={() => setDetailOpen(false)}>
                 Close

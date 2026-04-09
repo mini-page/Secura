@@ -34,6 +34,16 @@ db.exec(`
     ip_address TEXT NOT NULL,
     timestamp TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS share_links (
+    token TEXT PRIMARY KEY,
+    file_id TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (file_id) REFERENCES files(file_id),
+    FOREIGN KEY (created_by) REFERENCES users(user_id)
+  );
 `);
 
 module.exports = db;

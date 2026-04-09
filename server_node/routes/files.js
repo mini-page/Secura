@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../db");
 const config = require("../config");
@@ -104,6 +105,91 @@ router.get("/:id/download", (req, res) => {
   res.setHeader("Content-Type", file.mime_type);
   res.setHeader("Content-Disposition", `attachment; filename="${file.original_name}"`);
   return res.send(decrypted);
+});
+
+router.delete("/:id", (req, res) => {
+  const file = db.prepare("SELECT * FROM files WHERE file_id = ?").get(req.params.id);
+  if (!file) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  if (!ensureOwnerOrAdmin(req, file)) {
+    return res.status(403).json({ error: "Not allowed" });
+  }
+
+  try {
+    fs.unlinkSync(file.storage_path);
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      return res.status(500).json({ error: "Could not delete file from storage" });
+    }
+  }
+
+  db.prepare("DELETE FROM share_links WHERE file_id = ?").run(req.params.id);
+  db.prepare("DELETE FROM files WHERE file_id = ?").run(req.params.id);
+  logAudit({ userId: req.user.userId, action: "DELETE_FILE", ipAddress: req.ip });
+  return res.status(204).send();
+});
+
+router.post("/:id/share", (req, res) => {
+  const file = db.prepare("SELECT * FROM files WHERE file_id = ?").get(req.params.id);
+  if (!file) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  if (!ensureOwnerOrAdmin(req, file)) {
+    return res.status(403).json({ error: "Not allowed" });
+  }
+
+  const expiresMinutes = Number(req.body?.expires_minutes) || 1440;
+  const token = crypto.randomBytes(18).toString("base64url");
+  const now = new Date();
+  const expiresAt = expiresMinutes > 0
+    ? new Date(now.getTime() + expiresMinutes * 60 * 1000).toISOString()
+    : null;
+
+  db.prepare(
+    "INSERT INTO share_links (token, file_id, created_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(token, req.params.id, req.user.userId, expiresAt, now.toISOString());
+
+  logAudit({ userId: req.user.userId, action: "SHARE_CREATED", ipAddress: req.ip });
+  return res.json({ token, shareUrl: `/files/share/${token}`, expiresAt });
+});
+
+router.get("/:id/shares", (req, res) => {
+  const file = db.prepare("SELECT * FROM files WHERE file_id = ?").get(req.params.id);
+  if (!file) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  if (!ensureOwnerOrAdmin(req, file)) {
+    return res.status(403).json({ error: "Not allowed" });
+  }
+
+  const rows = db
+    .prepare("SELECT token, expires_at, created_at FROM share_links WHERE file_id = ? ORDER BY created_at DESC")
+    .all(req.params.id);
+
+  return res.json(
+    rows.map((row) => ({
+      token: row.token,
+      expiresAt: row.expires_at,
+      createdAt: row.created_at
+    }))
+  );
+});
+
+router.delete("/share/:token/revoke", (req, res) => {
+  const share = db
+    .prepare("SELECT sl.*, f.owner_id FROM share_links sl JOIN files f ON f.file_id = sl.file_id WHERE sl.token = ?")
+    .get(req.params.token);
+  if (!share) {
+    return res.status(404).json({ error: "Share link not found" });
+  }
+  if (req.user.role !== "admin" && share.owner_id !== req.user.userId) {
+    return res.status(403).json({ error: "Not allowed" });
+  }
+
+  db.prepare("DELETE FROM share_links WHERE token = ?").run(req.params.token);
+  logAudit({ userId: req.user.userId, action: "SHARE_REVOKED", ipAddress: req.ip });
+  return res.status(204).send();
 });
 
 module.exports = router;
