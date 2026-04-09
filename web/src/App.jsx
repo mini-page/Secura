@@ -1204,9 +1204,16 @@ export default function App() {
                 onClick={() => {
                   if (isDemo()) {
                     const rows = readLocalActivity();
+                    function csvField(value) {
+                      const str = String(value == null ? "" : value);
+                      if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+                        return `"${str.replace(/"/g, '""')}"`;
+                      }
+                      return str;
+                    }
                     let csv = "id,action,timestamp,ip\n";
                     for (const row of rows) {
-                      csv += `${row.id || ""},${row.action || ""},${row.timestamp || ""},\n`;
+                      csv += `${csvField(row.id)},${csvField(row.action)},${csvField(row.timestamp)},\n`;
                     }
                     const blob = new Blob([csv], { type: "text/csv" });
                     const url = URL.createObjectURL(blob);

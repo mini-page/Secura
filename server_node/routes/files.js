@@ -19,6 +19,10 @@ function ensureOwnerOrAdmin(req, file) {
   return req.user.role === "admin" || file.owner_id === req.user.userId;
 }
 
+function sanitizeFilename(name) {
+  return String(name).replace(/[\r\n"]/g, "_");
+}
+
 router.get("/", (req, res) => {
   const isAdmin = req.user.role === "admin";
   const rows = isAdmin
@@ -103,7 +107,7 @@ router.get("/:id/download", (req, res) => {
   logAudit({ userId: req.user.userId, action: "DOWNLOAD_FILE", ipAddress: req.ip });
 
   res.setHeader("Content-Type", file.mime_type);
-  res.setHeader("Content-Disposition", `attachment; filename="${file.original_name}"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${sanitizeFilename(file.original_name)}"`);
   return res.send(decrypted);
 });
 

@@ -6,6 +6,10 @@ const { logAudit } = require("../utils/audit");
 
 const router = express.Router();
 
+function sanitizeFilename(name) {
+  return String(name).replace(/[\r\n"]/g, "_");
+}
+
 // Public share download – no authentication required
 router.get("/:token", (req, res) => {
   const share = db
@@ -32,7 +36,7 @@ router.get("/:token", (req, res) => {
   logAudit({ userId: share.owner_id, action: "SHARE_DOWNLOADED", ipAddress: req.ip });
 
   res.setHeader("Content-Type", share.mime_type || "application/octet-stream");
-  res.setHeader("Content-Disposition", `attachment; filename="${share.original_name}"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${sanitizeFilename(share.original_name)}"`);
   return res.send(decrypted);
 });
 

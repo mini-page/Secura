@@ -34,9 +34,17 @@ router.get("/export", (req, res) => {
     )
     .all(req.user.userId);
 
+  function csvField(value) {
+    const str = String(value == null ? "" : value);
+    if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }
+
   let csv = "id,action,timestamp,ip\n";
   for (const row of rows) {
-    csv += `${row.log_id},${row.action},${row.timestamp},${row.ip_address}\n`;
+    csv += `${csvField(row.log_id)},${csvField(row.action)},${csvField(row.timestamp)},${csvField(row.ip_address)}\n`;
   }
 
   res.setHeader("Content-Type", "text/csv");

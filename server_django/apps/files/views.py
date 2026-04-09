@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import secrets
 from uuid import uuid4
@@ -15,6 +16,11 @@ from .serializers import StoredFileSerializer
 import mimetypes
 from .crypto import encrypt_bytes, decrypt_bytes
 from apps.audit.utils import log_action
+
+
+def _safe_filename(name: str) -> str:
+    """Strip characters that could break a Content-Disposition header."""
+    return re.sub(r'[\r\n"]', '_', name)
 
 
 @api_view(['GET'])
@@ -116,7 +122,7 @@ def download_file(request, file_id):
     log_action(request.user, 'DOWNLOAD_FILE', request.META.get('REMOTE_ADDR'))
     mime_type, _ = mimetypes.guess_type(record.original_name)
     response = HttpResponse(raw, content_type=mime_type or 'application/octet-stream')
-    response['Content-Disposition'] = f'attachment; filename=\"{record.original_name}\"'
+    response['Content-Disposition'] = f'attachment; filename="{_safe_filename(record.original_name)}"'
     return response
 
 
@@ -160,7 +166,7 @@ def download_share(request, token):
     log_action(record.owner, 'SHARE_DOWNLOADED', request.META.get('REMOTE_ADDR'))
     mime_type, _ = mimetypes.guess_type(record.original_name)
     response = HttpResponse(raw, content_type=mime_type or 'application/octet-stream')
-    response['Content-Disposition'] = f'attachment; filename=\"{record.original_name}\"'
+    response['Content-Disposition'] = f'attachment; filename="{_safe_filename(record.original_name)}"'
     return response
 
 
