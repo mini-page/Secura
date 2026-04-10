@@ -3,6 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const rateLimit = require("express-rate-limit");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../db");
 const config = require("../config");
@@ -10,9 +11,20 @@ const { encryptBuffer, decryptBuffer } = require("../utils/crypto");
 const { logAudit } = require("../utils/audit");
 
 const router = express.Router();
+
+const UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024; // 25 MB
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }
+  limits: { fileSize: UPLOAD_LIMIT_BYTES }
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Upload rate limit exceeded. Please slow down." }
 });
 
 function ensureOwnerOrAdmin(req, file) {
@@ -34,20 +46,39 @@ router.get("/", (req, res) => {
   return res.json(
     rows.map((row) => ({
       fileId: row.file_id,
+      logicalId: row.logical_id || row.file_id,
       ownerId: row.owner_id,
       originalName: row.original_name,
       mimeType: row.mime_type,
       sizeBytes: row.size_bytes,
+      version: row.version || 1,
       createdAt: row.created_at
     }))
   );
 });
 
-router.post("/upload", upload.single("file"), (req, res) => {
+router.post("/upload", uploadLimiter, upload.single("file"), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "File required" });
   }
+  if (req.file.size === 0) {
+    return res.status(400).json({ error: "File is empty" });
+  }
+
+  const originalName = sanitizeFilename(req.file.originalname || "upload.bin");
   const fileId = uuidv4();
+  const logicalId = uuidv4();
+
+  // Determine version for this logical file (by normalised name per user)
+  const existing = db
+    .prepare(
+      "SELECT logical_id, version FROM files WHERE owner_id = ? AND original_name = ? ORDER BY version DESC LIMIT 1"
+    )
+    .get(req.user.userId, originalName);
+
+  const resolvedLogicalId = existing ? existing.logical_id : logicalId;
+  const version = existing ? existing.version + 1 : 1;
+
   const { encrypted, iv, authTag } = encryptBuffer(req.file.buffer);
   const storagePath = path.join(config.storageDir, `${fileId}.bin`);
 
@@ -55,23 +86,31 @@ router.post("/upload", upload.single("file"), (req, res) => {
 
   db.prepare(
     `INSERT INTO files
-      (file_id, owner_id, original_name, mime_type, storage_path, size_bytes, iv, auth_tag, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (file_id, logical_id, owner_id, original_name, mime_type, storage_path, size_bytes, iv, auth_tag, version, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     fileId,
+    resolvedLogicalId,
     req.user.userId,
-    req.file.originalname,
+    originalName,
     req.file.mimetype || "application/octet-stream",
     storagePath,
     req.file.size,
     iv,
     authTag,
+    version,
     new Date().toISOString()
   );
 
   logAudit({ userId: req.user.userId, action: "UPLOAD_FILE", ipAddress: req.ip });
 
-  return res.json({ fileId });
+  return res.json({
+    fileId,
+    originalName,
+    sizeBytes: req.file.size,
+    version,
+    createdAt: new Date().toISOString()
+  });
 });
 
 router.get("/:id", (req, res) => {
@@ -84,10 +123,12 @@ router.get("/:id", (req, res) => {
   }
   return res.json({
     fileId: file.file_id,
+    logicalId: file.logical_id || file.file_id,
     ownerId: file.owner_id,
     originalName: file.original_name,
     mimeType: file.mime_type,
     sizeBytes: file.size_bytes,
+    version: file.version || 1,
     createdAt: file.created_at
   });
 });

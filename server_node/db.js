@@ -16,6 +16,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS files (
     file_id TEXT PRIMARY KEY,
+    logical_id TEXT NOT NULL DEFAULT '',
     owner_id TEXT NOT NULL,
     original_name TEXT NOT NULL,
     mime_type TEXT NOT NULL,
@@ -23,6 +24,7 @@ db.exec(`
     size_bytes INTEGER NOT NULL,
     iv TEXT NOT NULL,
     auth_tag TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     FOREIGN KEY (owner_id) REFERENCES users(user_id)
   );
@@ -47,3 +49,14 @@ db.exec(`
 `);
 
 module.exports = db;
+
+// Add columns introduced in later versions to existing databases (idempotent)
+(function migrateSchema() {
+  const filesCols = db.prepare("PRAGMA table_info(files)").all().map((c) => c.name);
+  if (!filesCols.includes("logical_id")) {
+    db.exec("ALTER TABLE files ADD COLUMN logical_id TEXT NOT NULL DEFAULT ''");
+  }
+  if (!filesCols.includes("version")) {
+    db.exec("ALTER TABLE files ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
+  }
+})();

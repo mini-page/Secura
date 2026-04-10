@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const config = require("./config");
 const authRoutes = require("./routes/auth");
 const fileRoutes = require("./routes/files");
@@ -14,13 +15,38 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
+// ── Rate limiting ────────────────────────────────────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts. Please try again in 15 minutes." }
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Upload rate limit exceeded. Please slow down." }
+});
+
+const shareDownloadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." }
+});
+
 app.get("/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
 
-app.use("/auth", authRoutes);
+app.use("/auth", authLimiter, authRoutes);
 // Public share download must be registered before the authenticated /files mount
-app.use("/files/share", sharePublicRoutes);
+app.use("/files/share", shareDownloadLimiter, sharePublicRoutes);
 app.use("/files", authRequired, fileRoutes);
 app.use("/activity", authRequired, activityRoutes);
 app.use("/analytics", authRequired, analyticsRoutes);

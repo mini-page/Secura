@@ -162,3 +162,10 @@ export function deleteFile(token, fileId) {
     headers: { Authorization: `Bearer ${token}` }
   });
 }
+
+export function adminRevokeShare(token, shareToken) {
+  return request(`/admin-api/shares/${shareToken}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}

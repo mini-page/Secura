@@ -17,7 +17,8 @@ import {
   login,
   register,
   uploadFileWithProgress,
-  deleteFile
+  deleteFile,
+  adminRevokeShare
 } from "./api/client";
 
 const STORAGE_KEY = "secura_web_session";
@@ -186,6 +187,32 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("secura_web_tags", JSON.stringify(fileTags));
   }, [fileTags]);
+
+  // ── Auto-lock: sign out after 2 min of inactivity ───────────────────────────
+  useEffect(() => {
+    if (!settings.autoLock || !state.token || isDemo()) return;
+
+    const IDLE_MS = 2 * 60 * 1000;
+    let timer = setTimeout(() => {
+      signOut();
+      pushToast("Signed out due to inactivity.", "info");
+    }, IDLE_MS);
+
+    function resetTimer() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        signOut();
+        pushToast("Signed out due to inactivity.", "info");
+      }, IDLE_MS);
+    }
+
+    const events = ["mousemove", "keydown", "pointerdown", "touchstart", "scroll"];
+    events.forEach((e) => window.addEventListener(e, resetTimer, { passive: true }));
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, resetTimer));
+    };
+  }, [settings.autoLock, state.token]);
 
 
   function readLocalFiles() {
@@ -469,6 +496,9 @@ export default function App() {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(absolute);
         pushToast("Share link copied.", "success");
+        if (settings.clipboardTimeout) {
+          setTimeout(() => navigator.clipboard.writeText("").catch(() => {}), 60 * 1000);
+        }
       } else {
         window.prompt("Copy share link:", absolute);
       }
@@ -500,8 +530,7 @@ export default function App() {
     }
   }
 
-  async function handleDeleteFile(file) {
-    if (!window.confirm(`Delete "${file.originalName}"? This cannot be undone.`)) return;
+  async function handleDeleteFile(file) {    if (!window.confirm(`Delete "${file.originalName}"? This cannot be undone.`)) return;
     if (isDemo()) {
       demoFileBlobs.delete(file.fileId);
       const updated = readLocalFiles().filter((f) => f.fileId !== file.fileId);
@@ -540,6 +569,16 @@ export default function App() {
       setAdminShares(shares || []);
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: err.message }));
+    }
+  }
+
+  async function handleAdminRevokeShare(shareToken) {
+    try {
+      await adminRevokeShare(state.token, shareToken);
+      setAdminShares((shares) => shares.filter((s) => s.token !== shareToken));
+      pushToast("Share link revoked.", "info");
+    } catch (err) {
+      pushToast(err.message || "Revoke failed.", "error");
     }
   }
 
@@ -910,9 +949,10 @@ export default function App() {
               <button
                 className="ghost small"
                 type="button"
-                onClick={() => setState((s) => ({ ...s, notice: "Google login is a demo placeholder." }))}
+                disabled
+                title="Google login is not available in this build."
               >
-                Continue with Google
+                Continue with Google <span className="muted" style={{fontSize:"0.75em"}}>(coming soon)</span>
               </button>
               <button className="ghost small" type="button" onClick={handleGuest}>
                 Continue as Guest
@@ -1334,12 +1374,13 @@ export default function App() {
               <div className="toggle-row">
                 <div>
                   <strong>Biometric unlock</strong>
-                  <div className="muted">Use fingerprint or Face ID.</div>
+                  <div className="muted">Use fingerprint or Face ID (mobile app only).</div>
                 </div>
                 <input
                   type="checkbox"
                   checked={settings.biometrics}
-                  onChange={() => setSettings((s) => ({ ...s, biometrics: !s.biometrics }))}
+                  disabled
+                  title="Biometric unlock is available in the mobile app."
                 />
               </div>
             </div>
@@ -1404,7 +1445,7 @@ export default function App() {
                   <strong>Google Drive</strong>
                   <div className="muted">Not linked</div>
                 </div>
-                <button className="ghost small">Link</button>
+                <button className="ghost small" disabled title="Coming soon">Coming soon</button>
               </div>
               <div className="connection-row">
                 <span className="conn-dot icloud" />
@@ -1412,7 +1453,7 @@ export default function App() {
                   <strong>iCloud</strong>
                   <div className="muted">Not linked</div>
                 </div>
-                <button className="ghost small">Link</button>
+                <button className="ghost small" disabled title="Coming soon">Coming soon</button>
               </div>
               <div className="connection-row">
                 <span className="conn-dot onedrive" />
@@ -1420,7 +1461,7 @@ export default function App() {
                   <strong>OneDrive</strong>
                   <div className="muted">Not linked</div>
                 </div>
-                <button className="ghost small">Link</button>
+                <button className="ghost small" disabled title="Coming soon">Coming soon</button>
               </div>
             </div>
           </div>
@@ -1536,7 +1577,15 @@ export default function App() {
                         {share.expiresAt ? new Date(share.expiresAt).toLocaleString() : "No expiry"}
                       </div>
                     </div>
-                    <span className="chip">{share.owner}</span>
+                    <div className="button-row">
+                      <span className="chip">{share.owner}</span>
+                      <button
+                        className="ghost small"
+                        onClick={() => handleAdminRevokeShare(share.token)}
+                      >
+                        Revoke
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -1619,9 +1668,16 @@ export default function App() {
                               ? API_BASE
                               : `${window.location.origin}${API_BASE}`;
                             const link = `${base}/files/share/${share.token}`;
-                            navigator.clipboard?.writeText
-                              ? navigator.clipboard.writeText(link).then(() => pushToast("Link copied.", "success"))
-                              : window.prompt("Copy share link:", link);
+                            if (navigator.clipboard?.writeText) {
+                              navigator.clipboard.writeText(link).then(() => {
+                                pushToast("Link copied.", "success");
+                                if (settings.clipboardTimeout) {
+                                  setTimeout(() => navigator.clipboard.writeText("").catch(() => {}), 60 * 1000);
+                                }
+                              });
+                            } else {
+                              window.prompt("Copy share link:", link);
+                            }
                           }}
                         >
                           Copy

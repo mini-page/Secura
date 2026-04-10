@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../db");
+const { logAudit } = require("../utils/audit");
 
 const router = express.Router();
 
@@ -59,6 +60,15 @@ router.get("/shares", (req, res) => {
       createdAt: row.created_at
     }))
   );
+});
+
+router.delete("/shares/:token", (req, res) => {
+  const result = db.prepare("DELETE FROM share_links WHERE token = ?").run(req.params.token);
+  if (result.changes === 0) {
+    return res.status(404).json({ error: "Share link not found" });
+  }
+  logAudit({ userId: req.user.userId, action: "SHARE_REVOKED", ipAddress: req.ip });
+  return res.status(204).send();
 });
 
 module.exports = router;
