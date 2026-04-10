@@ -40,6 +40,15 @@ const shareDownloadLimiter = rateLimit({
   message: { error: "Too many requests. Please try again later." }
 });
 
+// General limiter for authenticated API routes
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please slow down." }
+});
+
 app.get("/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
@@ -47,10 +56,10 @@ app.get("/health", (req, res) => {
 app.use("/auth", authLimiter, authRoutes);
 // Public share download must be registered before the authenticated /files mount
 app.use("/files/share", shareDownloadLimiter, sharePublicRoutes);
-app.use("/files", authRequired, fileRoutes);
-app.use("/activity", authRequired, activityRoutes);
-app.use("/analytics", authRequired, analyticsRoutes);
-app.use("/admin-api", authRequired, requireAdmin, adminRoutes);
+app.use("/files", authRequired, apiLimiter, fileRoutes);
+app.use("/activity", authRequired, apiLimiter, activityRoutes);
+app.use("/analytics", authRequired, apiLimiter, analyticsRoutes);
+app.use("/admin-api", authRequired, requireAdmin, apiLimiter, adminRoutes);
 
 app.use((err, req, res, next) => {
   const message = err?.message || "Server error";
