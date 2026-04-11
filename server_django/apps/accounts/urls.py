@@ -7,5 +7,6 @@ urlpatterns = [
     path('login', views.login),
     path('refresh', TokenRefreshView.as_view()),
     path('me', views.me),
+    path('change-password', views.change_password),
     path('guest', views.guest)
 ]

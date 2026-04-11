@@ -18,7 +18,10 @@ import {
   register,
   uploadFileWithProgress,
   deleteFile,
-  adminRevokeShare
+  adminRevokeShare,
+  adminToggleUser,
+  adminExportCsv,
+  changePassword
 } from "./api/client";
 
 const STORAGE_KEY = "secura_web_session";
@@ -77,6 +80,11 @@ export default function App() {
   const [tagInput, setTagInput] = useState("");
   const [shareLinks, setShareLinks] = useState([]);
   const [shareLoading, setShareLoading] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwMsg, setPwMsg] = useState({ text: "", type: "" });
+  const [pwLoading, setPwLoading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [settings, setSettings] = useState({
     autoLock: true,
     biometrics: false,
@@ -418,8 +426,17 @@ export default function App() {
   function openDetail(file) {
     setActiveFile(file);
     setDetailOpen(true);
+    setPreviewUrl(null);
     if (state.token && state.token !== "offline-guest") {
       loadShares(file.fileId);
+      if (fileIcon(file.originalName) === "IMG") {
+        fetch(`${API_BASE}/files/${file.fileId}/download`, {
+          headers: { Authorization: `Bearer ${state.token}` }
+        })
+          .then((res) => (res.ok ? res.blob() : Promise.reject()))
+          .then((blob) => setPreviewUrl(URL.createObjectURL(blob)))
+          .catch(() => setPreviewUrl(null));
+      }
     }
   }
 
@@ -579,6 +596,41 @@ export default function App() {
       pushToast("Share link revoked.", "info");
     } catch (err) {
       pushToast(err.message || "Revoke failed.", "error");
+    }
+  }
+
+  async function handleAdminToggleUser(userId) {
+    try {
+      const data = await adminToggleUser(state.token, userId);
+      setState((s) => ({
+        ...s,
+        adminUsers: s.adminUsers.map((u) =>
+          u.id === userId ? { ...u, isActive: data.isActive } : u
+        )
+      }));
+      pushToast(data.isActive ? "User enabled." : "User disabled.", "info");
+    } catch (err) {
+      pushToast(err.message || "Failed to update user.", "error");
+    }
+  }
+
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    if (!pwCurrent || !pwNew) {
+      setPwMsg({ text: "Both fields are required.", type: "error" });
+      return;
+    }
+    setPwLoading(true);
+    setPwMsg({ text: "", type: "" });
+    try {
+      await changePassword(state.token, pwCurrent, pwNew);
+      setPwMsg({ text: "Password updated successfully.", type: "success" });
+      setPwCurrent("");
+      setPwNew("");
+    } catch (err) {
+      setPwMsg({ text: err.message || "Failed to change password.", type: "error" });
+    } finally {
+      setPwLoading(false);
     }
   }
 
@@ -946,14 +998,6 @@ export default function App() {
                   <button className="ghost" type="button" onClick={signOut}>Sign out</button>
                 ) : null}
               </div>
-              <button
-                className="ghost small"
-                type="button"
-                disabled
-                title="Google login is not available in this build."
-              >
-                Continue with Google <span className="muted" style={{fontSize:"0.75em"}}>(coming soon)</span>
-              </button>
               <button className="ghost small" type="button" onClick={handleGuest}>
                 Continue as Guest
               </button>
@@ -1374,14 +1418,8 @@ export default function App() {
               <div className="toggle-row">
                 <div>
                   <strong>Biometric unlock</strong>
-                  <div className="muted">Use fingerprint or Face ID (mobile app only).</div>
+                  <div className="muted">Available in the Secura mobile app (fingerprint / Face ID).</div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={settings.biometrics}
-                  disabled
-                  title="Biometric unlock is available in the mobile app."
-                />
               </div>
             </div>
 
@@ -1439,31 +1477,45 @@ export default function App() {
 
             <div className="settings-card">
               <h3>Connections</h3>
-              <div className="connection-row">
-                <span className="conn-dot google" />
-                <div>
-                  <strong>Google Drive</strong>
-                  <div className="muted">Not linked</div>
-                </div>
-                <button className="ghost small" disabled title="Coming soon">Coming soon</button>
-              </div>
-              <div className="connection-row">
-                <span className="conn-dot icloud" />
-                <div>
-                  <strong>iCloud</strong>
-                  <div className="muted">Not linked</div>
-                </div>
-                <button className="ghost small" disabled title="Coming soon">Coming soon</button>
-              </div>
-              <div className="connection-row">
-                <span className="conn-dot onedrive" />
-                <div>
-                  <strong>OneDrive</strong>
-                  <div className="muted">Not linked</div>
-                </div>
-                <button className="ghost small" disabled title="Coming soon">Coming soon</button>
-              </div>
+              <p className="muted">
+                Cloud backup integrations (Google Drive, iCloud, OneDrive) are on the product roadmap
+                and will be added in a future release.
+              </p>
             </div>
+
+            {state.token && !isDemo() ? (
+              <div className="settings-card">
+                <h3>Change Password</h3>
+                <form onSubmit={handleChangePassword}>
+                  <label style={{ display: "block", marginBottom: "0.5rem" }}>
+                    Current password
+                    <input
+                      type="password"
+                      value={pwCurrent}
+                      onChange={(e) => setPwCurrent(e.target.value)}
+                      autoComplete="current-password"
+                    />
+                  </label>
+                  <label style={{ display: "block", marginBottom: "0.75rem" }}>
+                    New password
+                    <input
+                      type="password"
+                      value={pwNew}
+                      onChange={(e) => setPwNew(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  {pwMsg.text ? (
+                    <div className={pwMsg.type === "error" ? "error" : "notice"} style={{ marginBottom: "0.5rem" }}>
+                      {pwMsg.text}
+                    </div>
+                  ) : null}
+                  <button className="primary" type="submit" disabled={pwLoading}>
+                    {pwLoading ? "Updating…" : "Update password"}
+                  </button>
+                </form>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -1493,10 +1545,6 @@ export default function App() {
                   <span className="team-role">{member.role}</span>
                   <p className="muted">{member.focus}</p>
                 </div>
-                <div className="team-actions">
-                  <button className="ghost small">Profile</button>
-                  <button className="ghost small">Contact</button>
-                </div>
               </div>
             ))}
           </div>
@@ -1507,7 +1555,16 @@ export default function App() {
         <section className="panel admin panel-animate">
           <div className="panel-header">
             <h2>Admin Console</h2>
-            <button className="ghost" onClick={loadAdmin}>Refresh</button>
+            <div className="button-row">
+              <button className="ghost" onClick={loadAdmin}>Refresh</button>
+              <button
+                className="ghost small"
+                onClick={() => adminExportCsv(state.token).catch((err) => pushToast(err.message, "error"))}
+              >
+                <span className="icon"><Icon name="export" /></span>
+                Export All Logs
+              </button>
+            </div>
           </div>
           {state.error ? <div className="error">{state.error}</div> : null}
           {adminSummary ? (
@@ -1542,7 +1599,17 @@ export default function App() {
                       <strong>{user.email}</strong>
                       <div className="muted">Role: {user.role}</div>
                     </div>
-                    <span className="chip">{user.role}</span>
+                    <div className="button-row">
+                      <span className="chip">{user.role}</span>
+                      {user.email !== state.user?.email ? (
+                        <button
+                          className="ghost small"
+                          onClick={() => handleAdminToggleUser(user.id)}
+                        >
+                          {user.isActive === false ? "Enable" : "Disable"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 ))
               )}
@@ -1595,7 +1662,7 @@ export default function App() {
       ) : null}
 
       {detailOpen && activeFile ? (
-        <div className="modal-backdrop" onClick={() => setDetailOpen(false)}>
+        <div className="modal-backdrop" onClick={() => { setDetailOpen(false); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>
           <div className="modal-card" onClick={(event) => event.stopPropagation()}>
             <h3>File details</h3>
             <div className="modal-row">
@@ -1618,6 +1685,24 @@ export default function App() {
               <span className="muted">Encryption</span>
               <strong>AES-256-GCM</strong>
             </div>
+            {activeFile.checksum ? (
+              <div className="modal-row">
+                <span className="muted">Integrity (SHA-256)</span>
+                <strong style={{ fontFamily: "monospace", fontSize: "0.8em" }}>
+                  {activeFile.checksum.slice(0, 16)}…
+                </strong>
+              </div>
+            ) : null}
+            {fileIcon(activeFile.originalName) === "IMG" && previewUrl ? (
+              <div className="modal-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: "0.5rem" }}>
+                <span className="muted">Preview</span>
+                <img
+                  src={previewUrl}
+                  alt={activeFile.originalName}
+                  style={{ maxWidth: "100%", maxHeight: "220px", borderRadius: "6px", objectFit: "contain" }}
+                />
+              </div>
+            ) : null}
             <div className="modal-row">
               <span className="muted">Tags</span>
               <div className="tag-row">
@@ -1706,7 +1791,7 @@ export default function App() {
               <button className="ghost" onClick={() => handleDeleteFile(activeFile)}>
                 Delete
               </button>
-              <button className="ghost" onClick={() => setDetailOpen(false)}>
+              <button className="ghost" onClick={() => { setDetailOpen(false); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>
                 Close
               </button>
             </div>

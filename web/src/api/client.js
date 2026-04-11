@@ -169,3 +169,37 @@ export function adminRevokeShare(token, shareToken) {
     headers: { Authorization: `Bearer ${token}` }
   });
 }
+
+export function adminToggleUser(token, userId) {
+  return request(`/admin-api/users/${userId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function adminExportCsv(token) {
+  const res = await fetch(`${API_BASE}/admin-api/audit/export`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error("Export failed");
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "audit_all.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export function changePassword(token, currentPassword, newPassword) {
+  return request("/auth/change-password", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+  });
+}

@@ -9,7 +9,8 @@ class StoredFileSerializer(serializers.ModelSerializer):
     sizeBytes = serializers.IntegerField(source='size_bytes')
     version = serializers.IntegerField()
     createdAt = serializers.DateTimeField(source='created_at')
+    checksum = serializers.CharField()
 
     class Meta:
         model = StoredFile
-        fields = ('fileId', 'logicalId', 'originalName', 'sizeBytes', 'version', 'createdAt')
+        fields = ('fileId', 'logicalId', 'originalName', 'sizeBytes', 'version', 'createdAt', 'checksum')

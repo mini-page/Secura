@@ -11,6 +11,7 @@ import csv
 from io import StringIO
 from .models import AuditLog
 from .serializers import AuditLogSerializer
+from .utils import log_action
 from apps.files.models import StoredFile, ShareLink
 
 
@@ -66,6 +67,7 @@ def admin_users(request):
             'id': user.id,
             'email': user.email,
             'role': getattr(user.profile, 'role', 'user'),
+            'isActive': user.is_active,
             'createdAt': user.date_joined
         }
         for user in User.objects.all()
@@ -110,6 +112,55 @@ def admin_shares(request):
         for share in shares
     ]
     return Response(payload)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_revoke_share(request, token):
+    if not _is_admin(request.user):
+        return Response({'detail': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        share = ShareLink.objects.get(token=token)
+    except ShareLink.DoesNotExist:
+        return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+    share.delete()
+    log_action(request.user, 'ADMIN_SHARE_REVOKED', request.META.get('REMOTE_ADDR'))
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def admin_toggle_user(request, user_id):
+    if not _is_admin(request.user):
+        return Response({'detail': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        target = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+    if target == request.user:
+        return Response({'detail': 'Cannot modify your own account'}, status=status.HTTP_400_BAD_REQUEST)
+    target.is_active = not target.is_active
+    target.save(update_fields=['is_active'])
+    action = 'ADMIN_USER_ENABLED' if target.is_active else 'ADMIN_USER_DISABLED'
+    log_action(request.user, action, request.META.get('REMOTE_ADDR'))
+    return Response({'id': target.id, 'email': target.email, 'isActive': target.is_active})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_export_csv(request):
+    if not _is_admin(request.user):
+        return Response({'detail': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
+    logs = AuditLog.objects.all().order_by('-timestamp')
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['id', 'user', 'action', 'timestamp', 'ip'])
+    for log in logs:
+        writer.writerow([log.id, log.user.email if log.user else '', log.action, log.timestamp.isoformat(), log.ip])
+    from django.http import HttpResponse
+    response = HttpResponse(output.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="audit_all.csv"'
+    return response
 
 
 @api_view(['GET'])
