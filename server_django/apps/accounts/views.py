@@ -89,6 +89,24 @@ def guest(request):
     )
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    user = request.user
+    current = request.data.get('current_password') or ''
+    new_pw = request.data.get('new_password') or ''
+    if not current or not new_pw:
+        return Response({'detail': 'current_password and new_password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(new_pw) < 8:
+        return Response({'detail': 'New password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not user.check_password(current):
+        return Response({'detail': 'Current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+    user.set_password(new_pw)
+    user.save()
+    log_action(user, 'PASSWORD_CHANGED', request.META.get('REMOTE_ADDR'))
+    return Response({'detail': 'Password updated successfully.'})
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def me(request):

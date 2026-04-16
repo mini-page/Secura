@@ -16,7 +16,12 @@ import {
   guestLogin,
   login,
   register,
-  uploadFileWithProgress
+  uploadFileWithProgress,
+  deleteFile,
+  adminRevokeShare,
+  adminToggleUser,
+  adminExportCsv,
+  changePassword
 } from "./api/client";
 
 const STORAGE_KEY = "secura_web_session";
@@ -24,6 +29,10 @@ const THEME_KEY = "secura_web_theme";
 const SPLASH_KEY = "secura_web_seen_splash";
 const LOCAL_FILES_KEY = "secura_web_files";
 const LOCAL_ACTIVITY_KEY = "secura_web_activity";
+
+// In-memory store for file blobs uploaded in demo/offline mode.
+// These are only available for the current browser session.
+const demoFileBlobs = new Map();
 
 const initialState = {
   token: "",
@@ -71,6 +80,11 @@ export default function App() {
   const [tagInput, setTagInput] = useState("");
   const [shareLinks, setShareLinks] = useState([]);
   const [shareLoading, setShareLoading] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwMsg, setPwMsg] = useState({ text: "", type: "" });
+  const [pwLoading, setPwLoading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [settings, setSettings] = useState({
     autoLock: true,
     biometrics: false,
@@ -181,6 +195,32 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("secura_web_tags", JSON.stringify(fileTags));
   }, [fileTags]);
+
+  // ── Auto-lock: sign out after 2 min of inactivity ───────────────────────────
+  useEffect(() => {
+    if (!settings.autoLock || !state.token || isDemo()) return;
+
+    const IDLE_MS = 2 * 60 * 1000;
+    let timer = setTimeout(() => {
+      signOut();
+      pushToast("Signed out due to inactivity.", "info");
+    }, IDLE_MS);
+
+    function resetTimer() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        signOut();
+        pushToast("Signed out due to inactivity.", "info");
+      }, IDLE_MS);
+    }
+
+    const events = ["mousemove", "keydown", "pointerdown", "touchstart", "scroll"];
+    events.forEach((e) => window.addEventListener(e, resetTimer, { passive: true }));
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, resetTimer));
+    };
+  }, [settings.autoLock, state.token]);
 
 
   function readLocalFiles() {
@@ -338,6 +378,7 @@ export default function App() {
           sizeBytes: file.size || 0,
           createdAt: new Date().toISOString()
         };
+        demoFileBlobs.set(entry.fileId, file);
         const updated = [entry, ...localFiles];
         writeLocalFiles(updated);
         const logs = readLocalActivity();
@@ -385,8 +426,17 @@ export default function App() {
   function openDetail(file) {
     setActiveFile(file);
     setDetailOpen(true);
+    setPreviewUrl(null);
     if (state.token && state.token !== "offline-guest") {
       loadShares(file.fileId);
+      if (fileIcon(file.originalName) === "IMG") {
+        fetch(`${API_BASE}/files/${file.fileId}/download`, {
+          headers: { Authorization: `Bearer ${state.token}` }
+        })
+          .then((res) => (res.ok ? res.blob() : Promise.reject()))
+          .then((blob) => setPreviewUrl(URL.createObjectURL(blob)))
+          .catch(() => setPreviewUrl(null));
+      }
     }
   }
 
@@ -401,11 +451,24 @@ export default function App() {
 
   async function handleDownloadWeb(file) {
     if (isDemo()) {
+      const blob = demoFileBlobs.get(file.fileId);
+      if (!blob) {
+        pushToast("File content not available in this session. Re-upload to download.", "info");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.originalName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
       const logs = readLocalActivity();
       logs.unshift({ id: newId(), action: "DOWNLOAD_FILE", timestamp: new Date().toISOString() });
       writeLocalActivity(logs);
-      setState((s) => ({ ...s, activity: logs, notice: "Download ready (demo mode)." }));
-      pushToast(`Prepared ${file.originalName}`, "info");
+      setState((s) => ({ ...s, activity: logs }));
+      pushToast(`Downloaded ${file.originalName}`, "success");
       return;
     }
     try {
@@ -450,6 +513,9 @@ export default function App() {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(absolute);
         pushToast("Share link copied.", "success");
+        if (settings.clipboardTimeout) {
+          setTimeout(() => navigator.clipboard.writeText("").catch(() => {}), 60 * 1000);
+        }
       } else {
         window.prompt("Copy share link:", absolute);
       }
@@ -481,6 +547,29 @@ export default function App() {
     }
   }
 
+  async function handleDeleteFile(file) {    if (!window.confirm(`Delete "${file.originalName}"? This cannot be undone.`)) return;
+    if (isDemo()) {
+      demoFileBlobs.delete(file.fileId);
+      const updated = readLocalFiles().filter((f) => f.fileId !== file.fileId);
+      writeLocalFiles(updated);
+      const logs = readLocalActivity();
+      logs.unshift({ id: newId(), action: "DELETE_FILE", timestamp: new Date().toISOString() });
+      writeLocalActivity(logs);
+      setState((s) => ({ ...s, files: updated, activity: logs }));
+      if (detailOpen && activeFile?.fileId === file.fileId) setDetailOpen(false);
+      pushToast(`Deleted ${file.originalName}`, "info");
+      return;
+    }
+    try {
+      await deleteFile(state.token, file.fileId);
+      setState((s) => ({ ...s, files: s.files.filter((f) => f.fileId !== file.fileId) }));
+      if (detailOpen && activeFile?.fileId === file.fileId) setDetailOpen(false);
+      pushToast(`Deleted ${file.originalName}`, "success");
+    } catch (err) {
+      pushToast(err.message || "Delete failed.", "error");
+    }
+  }
+
   async function loadAdmin() {
     if (!state.token || !isAdmin) return;
     setState((s) => ({ ...s, loading: true, error: "" }));
@@ -497,6 +586,51 @@ export default function App() {
       setAdminShares(shares || []);
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: err.message }));
+    }
+  }
+
+  async function handleAdminRevokeShare(shareToken) {
+    try {
+      await adminRevokeShare(state.token, shareToken);
+      setAdminShares((shares) => shares.filter((s) => s.token !== shareToken));
+      pushToast("Share link revoked.", "info");
+    } catch (err) {
+      pushToast(err.message || "Revoke failed.", "error");
+    }
+  }
+
+  async function handleAdminToggleUser(userId) {
+    try {
+      const data = await adminToggleUser(state.token, userId);
+      setState((s) => ({
+        ...s,
+        adminUsers: s.adminUsers.map((u) =>
+          u.id === userId ? { ...u, isActive: data.isActive } : u
+        )
+      }));
+      pushToast(data.isActive ? "User enabled." : "User disabled.", "info");
+    } catch (err) {
+      pushToast(err.message || "Failed to update user.", "error");
+    }
+  }
+
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    if (!pwCurrent || !pwNew) {
+      setPwMsg({ text: "Both fields are required.", type: "error" });
+      return;
+    }
+    setPwLoading(true);
+    setPwMsg({ text: "", type: "" });
+    try {
+      await changePassword(state.token, pwCurrent, pwNew);
+      setPwMsg({ text: "Password updated successfully.", type: "success" });
+      setPwCurrent("");
+      setPwNew("");
+    } catch (err) {
+      setPwMsg({ text: err.message || "Failed to change password.", type: "error" });
+    } finally {
+      setPwLoading(false);
     }
   }
 
@@ -864,13 +998,6 @@ export default function App() {
                   <button className="ghost" type="button" onClick={signOut}>Sign out</button>
                 ) : null}
               </div>
-              <button
-                className="ghost small"
-                type="button"
-                onClick={() => setState((s) => ({ ...s, notice: "Google login is a demo placeholder." }))}
-              >
-                Continue with Google
-              </button>
               <button className="ghost small" type="button" onClick={handleGuest}>
                 Continue as Guest
               </button>
@@ -1118,6 +1245,15 @@ export default function App() {
                       <span className="icon"><Icon name="download" /></span>
                       Download
                     </button>
+                    <button
+                      className="ghost small"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDeleteFile(file);
+                      }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))
@@ -1149,7 +1285,33 @@ export default function App() {
               </button>
               <button
                 className="ghost small"
-                onClick={() => exportAuditCsv(state.token).catch((err) => pushToast(err.message, "error"))}
+                onClick={() => {
+                  if (isDemo()) {
+                    const rows = readLocalActivity();
+                    function csvField(value) {
+                      const str = String(value == null ? "" : value);
+                      if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+                        return `"${str.replace(/"/g, '""')}"`;
+                      }
+                      return str;
+                    }
+                    let csv = "id,action,timestamp,ip\n";
+                    for (const row of rows) {
+                      csv += `${csvField(row.id)},${csvField(row.action)},${csvField(row.timestamp)},\n`;
+                    }
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = "audit.csv";
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    URL.revokeObjectURL(url);
+                  } else {
+                    exportAuditCsv(state.token).catch((err) => pushToast(err.message, "error"));
+                  }
+                }}
               >
                 <span className="icon"><Icon name="export" /></span>
                 Export CSV
@@ -1256,13 +1418,8 @@ export default function App() {
               <div className="toggle-row">
                 <div>
                   <strong>Biometric unlock</strong>
-                  <div className="muted">Use fingerprint or Face ID.</div>
+                  <div className="muted">Available in the Secura mobile app (fingerprint / Face ID).</div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={settings.biometrics}
-                  onChange={() => setSettings((s) => ({ ...s, biometrics: !s.biometrics }))}
-                />
               </div>
             </div>
 
@@ -1320,31 +1477,45 @@ export default function App() {
 
             <div className="settings-card">
               <h3>Connections</h3>
-              <div className="connection-row">
-                <span className="conn-dot google" />
-                <div>
-                  <strong>Google Drive</strong>
-                  <div className="muted">Not linked</div>
-                </div>
-                <button className="ghost small">Link</button>
-              </div>
-              <div className="connection-row">
-                <span className="conn-dot icloud" />
-                <div>
-                  <strong>iCloud</strong>
-                  <div className="muted">Not linked</div>
-                </div>
-                <button className="ghost small">Link</button>
-              </div>
-              <div className="connection-row">
-                <span className="conn-dot onedrive" />
-                <div>
-                  <strong>OneDrive</strong>
-                  <div className="muted">Not linked</div>
-                </div>
-                <button className="ghost small">Link</button>
-              </div>
+              <p className="muted">
+                Cloud backup integrations (Google Drive, iCloud, OneDrive) are on the product roadmap
+                and will be added in a future release.
+              </p>
             </div>
+
+            {state.token && !isDemo() ? (
+              <div className="settings-card">
+                <h3>Change Password</h3>
+                <form onSubmit={handleChangePassword}>
+                  <label style={{ display: "block", marginBottom: "0.5rem" }}>
+                    Current password
+                    <input
+                      type="password"
+                      value={pwCurrent}
+                      onChange={(e) => setPwCurrent(e.target.value)}
+                      autoComplete="current-password"
+                    />
+                  </label>
+                  <label style={{ display: "block", marginBottom: "0.75rem" }}>
+                    New password
+                    <input
+                      type="password"
+                      value={pwNew}
+                      onChange={(e) => setPwNew(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  {pwMsg.text ? (
+                    <div className={pwMsg.type === "error" ? "error" : "notice"} style={{ marginBottom: "0.5rem" }}>
+                      {pwMsg.text}
+                    </div>
+                  ) : null}
+                  <button className="primary" type="submit" disabled={pwLoading}>
+                    {pwLoading ? "Updating…" : "Update password"}
+                  </button>
+                </form>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -1374,10 +1545,6 @@ export default function App() {
                   <span className="team-role">{member.role}</span>
                   <p className="muted">{member.focus}</p>
                 </div>
-                <div className="team-actions">
-                  <button className="ghost small">Profile</button>
-                  <button className="ghost small">Contact</button>
-                </div>
               </div>
             ))}
           </div>
@@ -1388,7 +1555,16 @@ export default function App() {
         <section className="panel admin panel-animate">
           <div className="panel-header">
             <h2>Admin Console</h2>
-            <button className="ghost" onClick={loadAdmin}>Refresh</button>
+            <div className="button-row">
+              <button className="ghost" onClick={loadAdmin}>Refresh</button>
+              <button
+                className="ghost small"
+                onClick={() => adminExportCsv(state.token).catch((err) => pushToast(err.message, "error"))}
+              >
+                <span className="icon"><Icon name="export" /></span>
+                Export All Logs
+              </button>
+            </div>
           </div>
           {state.error ? <div className="error">{state.error}</div> : null}
           {adminSummary ? (
@@ -1423,7 +1599,17 @@ export default function App() {
                       <strong>{user.email}</strong>
                       <div className="muted">Role: {user.role}</div>
                     </div>
-                    <span className="chip">{user.role}</span>
+                    <div className="button-row">
+                      <span className="chip">{user.role}</span>
+                      {user.email !== state.user?.email ? (
+                        <button
+                          className="ghost small"
+                          onClick={() => handleAdminToggleUser(user.id)}
+                        >
+                          {user.isActive === false ? "Enable" : "Disable"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 ))
               )}
@@ -1458,7 +1644,15 @@ export default function App() {
                         {share.expiresAt ? new Date(share.expiresAt).toLocaleString() : "No expiry"}
                       </div>
                     </div>
-                    <span className="chip">{share.owner}</span>
+                    <div className="button-row">
+                      <span className="chip">{share.owner}</span>
+                      <button
+                        className="ghost small"
+                        onClick={() => handleAdminRevokeShare(share.token)}
+                      >
+                        Revoke
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -1468,7 +1662,7 @@ export default function App() {
       ) : null}
 
       {detailOpen && activeFile ? (
-        <div className="modal-backdrop" onClick={() => setDetailOpen(false)}>
+        <div className="modal-backdrop" onClick={() => { setDetailOpen(false); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>
           <div className="modal-card" onClick={(event) => event.stopPropagation()}>
             <h3>File details</h3>
             <div className="modal-row">
@@ -1491,6 +1685,24 @@ export default function App() {
               <span className="muted">Encryption</span>
               <strong>AES-256-GCM</strong>
             </div>
+            {activeFile.checksum ? (
+              <div className="modal-row">
+                <span className="muted">Integrity (SHA-256)</span>
+                <strong style={{ fontFamily: "monospace", fontSize: "0.8em" }}>
+                  {activeFile.checksum.slice(0, 16)}…
+                </strong>
+              </div>
+            ) : null}
+            {fileIcon(activeFile.originalName) === "IMG" && previewUrl ? (
+              <div className="modal-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: "0.5rem" }}>
+                <span className="muted">Preview</span>
+                <img
+                  src={previewUrl}
+                  alt={activeFile.originalName}
+                  style={{ maxWidth: "100%", maxHeight: "220px", borderRadius: "6px", objectFit: "contain" }}
+                />
+              </div>
+            ) : null}
             <div className="modal-row">
               <span className="muted">Tags</span>
               <div className="tag-row">
@@ -1541,9 +1753,16 @@ export default function App() {
                               ? API_BASE
                               : `${window.location.origin}${API_BASE}`;
                             const link = `${base}/files/share/${share.token}`;
-                            navigator.clipboard?.writeText
-                              ? navigator.clipboard.writeText(link).then(() => pushToast("Link copied.", "success"))
-                              : window.prompt("Copy share link:", link);
+                            if (navigator.clipboard?.writeText) {
+                              navigator.clipboard.writeText(link).then(() => {
+                                pushToast("Link copied.", "success");
+                                if (settings.clipboardTimeout) {
+                                  setTimeout(() => navigator.clipboard.writeText("").catch(() => {}), 60 * 1000);
+                                }
+                              });
+                            } else {
+                              window.prompt("Copy share link:", link);
+                            }
                           }}
                         >
                           Copy
@@ -1569,7 +1788,10 @@ export default function App() {
                 <span className="icon"><Icon name="share" /></span>
                 Share
               </button>
-              <button className="ghost" onClick={() => setDetailOpen(false)}>
+              <button className="ghost" onClick={() => handleDeleteFile(activeFile)}>
+                Delete
+              </button>
+              <button className="ghost" onClick={() => { setDetailOpen(false); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>
                 Close
               </button>
             </div>
