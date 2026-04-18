@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   API_BASE,
   downloadEncryptedFile,
-  decryptUploadedFile,
   createShareLink,
   fetchShareLinks,
   revokeShareLink,
@@ -62,7 +61,6 @@ export default function App() {
   const [uploadStage, setUploadStage] = useState("Idle");
   const [encryptingName, setEncryptingName] = useState("");
   const [uploadComplete, setUploadComplete] = useState("");
-  const [decrypting, setDecrypting] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [favorites, setFavorites] = useState({});
@@ -131,7 +129,6 @@ export default function App() {
   ];
 
   const uploadInputRef = useRef(null);
-  const decryptInputRef = useRef(null);
   const isAdmin = state.user?.role === "admin";
 
   useEffect(() => {
@@ -480,35 +477,6 @@ export default function App() {
     } catch (err) {
       setState((s) => ({ ...s, error: err.message }));
       pushToast(err.message || "Download failed.", "error");
-    }
-  }
-
-  async function handleDecryptUpload(event) {
-    const encryptedFile = event.target.files?.[0];
-    event.target.value = "";
-    if (!encryptedFile) return;
-    if (isDemo()) {
-      pushToast("Decrypt upload requires backend session.", "info");
-      return;
-    }
-    setDecrypting(true);
-    try {
-      const { blob, fileName } = await decryptUploadedFile(state.token, encryptedFile);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName || "decrypted.bin";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      setState((s) => ({ ...s, notice: "Decrypt complete. Download started.", error: "" }));
-      pushToast(`Decrypted file downloaded: ${fileName}`, "success");
-    } catch (err) {
-      setState((s) => ({ ...s, error: err.message }));
-      pushToast(err.message || "Decrypt failed.", "error");
-    } finally {
-      setDecrypting(false);
     }
   }
 
@@ -998,19 +966,23 @@ export default function App() {
           <div className="auth-card">
             <form className="auth" onSubmit={handleAuth}>
               <div className="tabs">
-                {[
-                  { key: "login", label: "Login" },
-                  { key: "register", label: "Register" }
-                ].map((tab) => (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    className={mode === tab.key ? "tab active" : "tab"}
-                    onClick={() => setMode(tab.key)}
-                  >
-                    <span className="icon"><Icon name={tab.icon} /></span>{tab.label}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  className={mode === "login" ? "tab active" : "tab"}
+                  onClick={() => setMode("login")}
+                >
+                  Login
+                </button>
+                <button
+                  type="button"
+                  className="tab"
+                  disabled
+                  aria-label="Register – Coming Soon"
+                  style={{ opacity: 0.55, cursor: "not-allowed", position: "relative" }}
+                >
+                  Register
+                  <span className="soon-badge" aria-hidden="true">Coming Soon</span>
+                </button>
               </div>
               <label>
                 Email
@@ -1073,23 +1045,6 @@ export default function App() {
                 Refresh
               </button>
             </div>
-          </div>
-
-          <div className="decrypt-row">
-            <div className="muted">
-              Decrypt section: upload a <code>.secura</code> file downloaded from Secura to recover the original file.
-            </div>
-            <label className="upload-btn">
-              <span className="icon"><Icon name="upload" /></span>
-              {decrypting ? "Decrypting..." : "Upload encrypted file to decrypt"}
-              <input
-                type="file"
-                onChange={handleDecryptUpload}
-                disabled={decrypting || uploading}
-                ref={decryptInputRef}
-                accept=".secura,application/vnd.secura.encrypted+json,application/json"
-              />
-            </label>
           </div>
 
           <div className="usage-row">
@@ -1469,6 +1424,7 @@ export default function App() {
                   <strong>Biometric unlock</strong>
                   <div className="muted">Available in the Secura mobile app (fingerprint / Face ID).</div>
                 </div>
+                <span className="soon-badge" aria-label="Coming Soon" role="status">Coming Soon</span>
               </div>
             </div>
 
@@ -1505,11 +1461,7 @@ export default function App() {
                   <strong>Haptic feedback</strong>
                   <div className="muted">Subtle taps for secure actions.</div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={settings.haptics}
-                  onChange={() => setSettings((s) => ({ ...s, haptics: !s.haptics }))}
-                />
+                <span className="soon-badge" aria-label="Coming Soon" role="status">Coming Soon</span>
               </div>
               <div className="toggle-row">
                 <div>
@@ -1527,9 +1479,29 @@ export default function App() {
             <div className="settings-card">
               <h3>Connections</h3>
               <p className="muted">
-                Cloud backup integrations (Google Drive, iCloud, OneDrive) are on the product roadmap
-                and will be added in a future release.
+                Cloud backup integrations are on the product roadmap and will be added in a future release.
               </p>
+              <div className="connection-row">
+                <span className="conn-dot google" />
+                <span>Google Drive</span>
+                <button className="ghost small" disabled aria-label="Connect Google Drive – Coming Soon" style={{ opacity: 0.55, cursor: "not-allowed" }}>
+                  Connect <span className="soon-badge" aria-hidden="true">Coming Soon</span>
+                </button>
+              </div>
+              <div className="connection-row">
+                <span className="conn-dot icloud" />
+                <span>iCloud</span>
+                <button className="ghost small" disabled aria-label="Connect iCloud – Coming Soon" style={{ opacity: 0.55, cursor: "not-allowed" }}>
+                  Connect <span className="soon-badge" aria-hidden="true">Coming Soon</span>
+                </button>
+              </div>
+              <div className="connection-row">
+                <span className="conn-dot onedrive" />
+                <span>OneDrive</span>
+                <button className="ghost small" disabled aria-label="Connect OneDrive – Coming Soon" style={{ opacity: 0.55, cursor: "not-allowed" }}>
+                  Connect <span className="soon-badge" aria-hidden="true">Coming Soon</span>
+                </button>
+              </div>
             </div>
 
             {state.token && !isDemo() ? (
