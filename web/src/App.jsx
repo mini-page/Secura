@@ -1080,7 +1080,7 @@ export default function App() {
               Decrypt section: upload a <code>.secura</code> file downloaded from Secura to recover the original file.
             </div>
             <label className="upload-btn">
-              <span className="icon"><Icon name="download" /></span>
+              <span className="icon"><Icon name="upload" /></span>
               {decrypting ? "Decrypting..." : "Upload encrypted file to decrypt"}
               <input
                 type="file"
