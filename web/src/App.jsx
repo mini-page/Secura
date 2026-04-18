@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   API_BASE,
-  downloadFile,
+  downloadEncryptedFile,
+  decryptUploadedFile,
   createShareLink,
   fetchShareLinks,
   revokeShareLink,
@@ -61,6 +62,7 @@ export default function App() {
   const [uploadStage, setUploadStage] = useState("Idle");
   const [encryptingName, setEncryptingName] = useState("");
   const [uploadComplete, setUploadComplete] = useState("");
+  const [decrypting, setDecrypting] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [favorites, setFavorites] = useState({});
@@ -129,6 +131,7 @@ export default function App() {
   ];
 
   const uploadInputRef = useRef(null);
+  const decryptInputRef = useRef(null);
   const isAdmin = state.user?.role === "admin";
 
   useEffect(() => {
@@ -472,11 +475,40 @@ export default function App() {
       return;
     }
     try {
-      await downloadFile(state.token, file.fileId, file.originalName);
-      pushToast(`Downloaded ${file.originalName}`, "success");
+      await downloadEncryptedFile(state.token, file.fileId, file.originalName);
+      pushToast(`Encrypted download ready: ${file.originalName}.secura`, "success");
     } catch (err) {
       setState((s) => ({ ...s, error: err.message }));
       pushToast(err.message || "Download failed.", "error");
+    }
+  }
+
+  async function handleDecryptUpload(event) {
+    const encryptedFile = event.target.files?.[0];
+    event.target.value = "";
+    if (!encryptedFile) return;
+    if (isDemo()) {
+      pushToast("Decrypt upload requires backend session.", "info");
+      return;
+    }
+    setDecrypting(true);
+    try {
+      const { blob, fileName } = await decryptUploadedFile(state.token, encryptedFile);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName || "decrypted.bin";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setState((s) => ({ ...s, notice: "Decrypt complete. Download started.", error: "" }));
+      pushToast(`Decrypted file downloaded: ${fileName}`, "success");
+    } catch (err) {
+      setState((s) => ({ ...s, error: err.message }));
+      pushToast(err.message || "Decrypt failed.", "error");
+    } finally {
+      setDecrypting(false);
     }
   }
 
@@ -1041,6 +1073,23 @@ export default function App() {
                 Refresh
               </button>
             </div>
+          </div>
+
+          <div className="decrypt-row">
+            <div className="muted">
+              Decrypt section: upload a <code>.secura</code> file downloaded from Secura to recover the original file.
+            </div>
+            <label className="upload-btn">
+              <span className="icon"><Icon name="download" /></span>
+              {decrypting ? "Decrypting..." : "Upload encrypted file to decrypt"}
+              <input
+                type="file"
+                onChange={handleDecryptUpload}
+                disabled={decrypting || uploading}
+                ref={decryptInputRef}
+                accept=".secura,application/vnd.secura.encrypted+json,application/json"
+              />
+            </label>
           </div>
 
           <div className="usage-row">

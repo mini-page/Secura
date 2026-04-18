@@ -772,6 +772,14 @@ input {
   display: none;
 }
 
+.decrypt-row {
+  margin: 8px 0 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
 .progress-row {
   display: flex;
   align-items: center;

@@ -35,6 +35,17 @@ function sanitizeFilename(name) {
   return String(name).replace(/[\r\n"]/g, "_");
 }
 
+function buildEncryptedPackage(file, encryptedBuffer) {
+  return {
+    magic: "SECURA_ENC_V1",
+    originalName: file.original_name,
+    mimeType: file.mime_type || "application/octet-stream",
+    iv: file.iv,
+    authTag: file.auth_tag,
+    ciphertext: encryptedBuffer.toString("base64")
+  };
+}
+
 router.get("/", (req, res) => {
   const isAdmin = req.user.role === "admin";
   const rows = isAdmin
@@ -150,6 +161,67 @@ router.get("/:id/download", (req, res) => {
   res.setHeader("Content-Type", file.mime_type);
   res.setHeader("Content-Disposition", `attachment; filename="${sanitizeFilename(file.original_name)}"`);
   return res.send(decrypted);
+});
+
+router.get("/:id/download-encrypted", (req, res) => {
+  const file = db.prepare("SELECT * FROM files WHERE file_id = ?").get(req.params.id);
+  if (!file) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  if (!ensureOwnerOrAdmin(req, file)) {
+    return res.status(403).json({ error: "Not allowed" });
+  }
+
+  const encrypted = fs.readFileSync(file.storage_path);
+  const payload = buildEncryptedPackage(file, encrypted);
+  const packageBuffer = Buffer.from(JSON.stringify(payload), "utf8");
+
+  logAudit({ userId: req.user.userId, action: "DOWNLOAD_FILE", ipAddress: req.ip });
+
+  const packageName = `${sanitizeFilename(file.original_name)}.secura`;
+  res.setHeader("Content-Type", "application/vnd.secura.encrypted+json");
+  res.setHeader("Content-Disposition", `attachment; filename="${packageName}"`);
+  return res.send(packageBuffer);
+});
+
+router.post("/decrypt", uploadLimiter, upload.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "Encrypted file required" });
+  }
+  if (req.file.size === 0) {
+    return res.status(400).json({ error: "File is empty" });
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(req.file.buffer.toString("utf8"));
+  } catch {
+    return res.status(400).json({ error: "Invalid encrypted file format" });
+  }
+
+  if (
+    payload?.magic !== "SECURA_ENC_V1" ||
+    typeof payload?.iv !== "string" ||
+    typeof payload?.authTag !== "string" ||
+    typeof payload?.ciphertext !== "string"
+  ) {
+    return res.status(400).json({ error: "Unsupported encrypted file format" });
+  }
+
+  try {
+    const encryptedBuffer = Buffer.from(payload.ciphertext, "base64");
+    const decrypted = decryptBuffer(encryptedBuffer, payload.iv, payload.authTag);
+    const outputName = sanitizeFilename(payload.originalName || "decrypted.bin");
+    const outputType = typeof payload.mimeType === "string" ? payload.mimeType : "application/octet-stream";
+
+    logAudit({ userId: req.user.userId, action: "DECRYPT_FILE", ipAddress: req.ip });
+
+    res.setHeader("Content-Type", outputType);
+    res.setHeader("Content-Disposition", `attachment; filename="${outputName}"`);
+    return res.send(decrypted);
+  } catch {
+    return res.status(400).json({ error: "Could not decrypt file" });
+  }
 });
 
 router.delete("/:id", (req, res) => {

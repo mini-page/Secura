@@ -96,14 +96,7 @@ export function uploadFileWithProgress(token, file, onProgress) {
   });
 }
 
-export async function downloadFile(token, fileId, fileName) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/download`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!res.ok) {
-    throw new Error("Download failed");
-  }
-  const blob = await res.blob();
+function saveBlob(blob, fileName) {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -112,6 +105,60 @@ export async function downloadFile(token, fileId, fileName) {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);
+}
+
+function parseFilename(contentDisposition) {
+  if (!contentDisposition) return "";
+  const starMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (starMatch?.[1]) {
+    try {
+      return decodeURIComponent(starMatch[1]);
+    } catch {
+      return starMatch[1];
+    }
+  }
+  const match = contentDisposition.match(/filename="?([^"]+)"?/i);
+  return match?.[1] || "";
+}
+
+export async function downloadFile(token, fileId, fileName) {
+  const res = await fetch(`${API_BASE}/files/${fileId}/download`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) {
+    throw new Error("Download failed");
+  }
+  const blob = await res.blob();
+  saveBlob(blob, fileName);
+}
+
+export async function downloadEncryptedFile(token, fileId, fileName) {
+  const res = await fetch(`${API_BASE}/files/${fileId}/download-encrypted`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) {
+    throw new Error("Encrypted download failed");
+  }
+  const blob = await res.blob();
+  saveBlob(blob, `${fileName || "file"}.secura`);
+}
+
+export async function decryptUploadedFile(token, file) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/files/decrypt`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.detail || data?.error || "Decrypt failed");
+  }
+  const blob = await res.blob();
+  const contentDisposition = res.headers.get("Content-Disposition") || res.headers.get("content-disposition");
+  const fileName = parseFilename(contentDisposition) || "decrypted.bin";
+  return { blob, fileName };
 }
 
 export function fetchAdminUsers(token) {
