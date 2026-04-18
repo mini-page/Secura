@@ -772,6 +772,26 @@ input {
   display: none;
 }
 
+.soon-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: var(--chip-bg);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+:root[data-theme="dark"] .soon-badge {
+  background: rgba(107, 140, 255, 0.14);
+  color: #9bb0d6;
+}
+
 .progress-row {
   display: flex;
   align-items: center;
