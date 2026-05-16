@@ -433,7 +433,7 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "center" }}><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => pushToast("Login Error", "error")} theme="filled_blue" shape="pill" width="320" /></div>
           <div className="divider"><span>OR</span></div>
           <button className="primary-btn" onClick={handleGuest}>Continue as Guest</button>
-          <a href="https://secura.app/download" target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "14px", textDecoration: "none" }}>Download Mobile App</a>
+          <a href="https://github.com/mini-page/Secura/releases" target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "14px", textDecoration: "none" }}>Download Mobile App</a>
         </div>
       </div>
     );

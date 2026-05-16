@@ -2,7 +2,26 @@
 
 **Secure File Storage System (SFSS)** — A professional-grade, Zero-Knowledge file vault featuring password-derived AES-256-GCM encryption, plausible deniability protocols, and a cloud-synced metadata registry.
 
-![Secura dashboard overview](docs/assets/dashborad%20overview.png)
+---
+
+## 📸 Product Showcase
+
+| **Login & Identity** | **Secure Dashboard** |
+| :---: | :---: |
+| ![Login Screen](web/public/login%20screen.png) | ![Home Screen](web/public/home%20screen.png) |
+| *Google OAuth & Guest Auth* | *Encrypted Overview* |
+
+| **Encryption Tools** | **Secure Notes** |
+| :---: | :---: |
+| ![Tools Screen](web/public/tools%20screen%20for%20encryp%20and%20decryp.png) | ![Secure Notes](web/public/secura%20notes.png) |
+| *AES-GCM Local Processing* | *Zero-Knowledge Notes* |
+
+| **Technical Audit** | **Mobile Growth Funnel** |
+| :---: | :---: |
+| ![Technical Audit](web/public/tech%20audit.png) | ![Pro Features](web/public/promotions%20cause%20soemthing%20is%20coming.png) |
+| *PBKDF2 Verification* | *Ecosystem Roadmap* |
+
+---
 
 ## ✨ Project Evolution: The "Work Wow" Factor
 Secura has evolved from a standard file uploader into a high-security **Privacy Sandbox**. By implementing Zero-Knowledge principles, we ensure that user data is encrypted locally and sensitive keys never leave the browser.
@@ -18,7 +37,6 @@ Secura has evolved from a standard file uploader into a high-security **Privacy 
 ```
 server_django/   Django Backend (Metadata Registry, Audit Log, Identity)
 web/             React Web Client (Zero-Knowledge Local Sandbox)
-src/             React Native Mobile App (The "Sync & Inheritance" Pro Demo)
 ```
 
 ## 🚀 Quick Start (Local Development)
@@ -48,14 +66,16 @@ Secura follows industry-standard security protocols:
 
 For a deep dive into our security model, see [SECURITY.md](SECURITY.md).
 
-## 📊 Roadmap & Ecosystem
-The web app serves as the high-security "Lite" entry point, while the **Secura Mobile App** unlocks the full ecosystem:
+## 📱 Mobile Ecosystem
+The **Secura Mobile App** (Available in Releases) unlocks the full ecosystem:
 - [x] Local Sandbox (Web)
 - [x] Metadata Cloud Sync
 - [x] Plausible Deniability
 - [ ] Cloud Drive Integration (Mobile Pro)
 - [ ] Emergency Inheritance Protocol (Mobile Pro)
 - [ ] Biometric Secure Enclave (Mobile Pro)
+
+[**Download Secura Mobile (v1.0-Release)**](https://github.com/mini-page/Secura/releases)
 
 ## 📄 License
 MIT. See `LICENSE`.
