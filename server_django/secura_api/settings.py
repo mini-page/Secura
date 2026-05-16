@@ -99,4 +99,6 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('JWT_REFRESH_DAYS', '7')))
 }
 
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
+
 STORAGE_DIR = os.getenv('STORAGE_DIR', str(BASE_DIR / 'storage'))

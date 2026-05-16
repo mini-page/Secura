@@ -8,6 +8,9 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import timedelta
 from django.contrib.auth.models import User
+from django.conf import settings
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 from .serializers import RegisterSerializer, ProfileSerializer
 from apps.audit.utils import log_action
 
@@ -42,6 +45,43 @@ def register(request):
             status=status.HTTP_201_CREATED
         )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+def google_auth(request):
+    token = request.data.get('credential')
+    if not token:
+        return Response({'detail': 'Google credential required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    client_id = getattr(settings, 'GOOGLE_CLIENT_ID', None)
+    if not client_id:
+        return Response({'detail': 'Google Auth not configured on server'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    try:
+        idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+        if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+            raise ValueError('Wrong issuer.')
+        
+        email = idinfo['email'].lower()
+        # Get or create user
+        user, created = User.objects.get_or_create(username=email, defaults={'email': email})
+        if created:
+            user.set_unusable_password()
+            user.save()
+            log_action(user, 'GOOGLE_REGISTER', request.META.get('REMOTE_ADDR'))
+        else:
+            log_action(user, 'GOOGLE_LOGIN', request.META.get('REMOTE_ADDR'))
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'token': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': {'email': user.email, 'role': getattr(user.profile, 'role', 'user')}
+        })
+    except ValueError as e:
+        return Response({'detail': f'Invalid token: {str(e)}'}, status=status.HTTP_401_UNAUTHORIZED)
+    except Exception as e:
+        return Response({'detail': f'Google Auth Error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])

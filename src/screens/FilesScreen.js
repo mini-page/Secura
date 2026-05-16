@@ -1,11 +1,11 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   Animated,
   RefreshControl,
-  ScrollView,
+  FlatList,
   StyleSheet,
   Text,
   TextInput,
@@ -121,11 +121,11 @@ export default function FilesScreen({ navigation }) {
     }
   }
 
-  async function handleRefresh() {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadFiles();
     setRefreshing(false);
-  }
+  }, [token]);
 
   function formatBytes(bytes = 0) {
     if (bytes >= 1024 * 1024 * 1024) {
@@ -146,9 +146,10 @@ export default function FilesScreen({ navigation }) {
     return "file";
   }
 
-  const filteredFiles = files.filter((file) =>
+  const filteredFiles = useMemo(() => files.filter((file) =>
     file.originalName.toLowerCase().includes(query.trim().toLowerCase())
-  );
+  ), [files, query]);
+
   const sortedFiles = useMemo(() => {
     const sorted = [...filteredFiles];
     if (sortBy === "name") {
@@ -160,10 +161,12 @@ export default function FilesScreen({ navigation }) {
     }
     return sorted;
   }, [filteredFiles, sortBy]);
+
   const recentFiles = useMemo(() => {
     const sorted = [...files].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     return sorted.slice(0, 2);
   }, [files]);
+
   const totalBytes = useMemo(() => files.reduce((sum, file) => sum + (file.sizeBytes || 0), 0), [files]);
   const usageRatio = Math.min(1, totalBytes / totalQuota);
 
@@ -198,6 +201,250 @@ export default function FilesScreen({ navigation }) {
       Animated.spring(heroScale, { toValue: 1, useNativeDriver: true, friction: 7 })
     ]).start();
   }, [heroFade, heroScale]);
+
+  const renderHeader = () => (
+    <View style={styles.headerContainer}>
+      <Animated.View style={[styles.heroHeader, { opacity: heroFade, transform: [{ scale: heroScale }] }]}>
+        <Text
+          style={[
+            styles.overline,
+            { color: colors.primary700, fontWeight: "700", letterSpacing: 0.4 }
+          ]}
+        >
+          Secura
+        </Text>
+        <Text style={[styles.title, { color: colors.textPrimary }]}>Secure file vault</Text>
+        <Text style={[styles.caption, { color: colors.textSecondary }]}>
+          Built for privacy, clarity, and control on the go.
+        </Text>
+        <View style={styles.heroActions}>
+          <PrimaryButton title="Upload File" onPress={handleUpload} disabled={busy} />
+          {successNote ? (
+            <View style={[styles.successChip, { backgroundColor: colors.badgeBg }]}>
+              <Feather name="check" size={14} color={colors.badgeText} />
+              <Text style={[styles.successText, { color: colors.badgeText, marginLeft: 6 }]}>
+                {successNote}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </Animated.View>
+
+      <View style={[styles.usageCard, { backgroundColor: colors.surface, borderColor: colors.outline }]}>
+        <View style={styles.usageHeader}>
+          <View>
+            <Text style={[styles.usageTitle, { color: colors.textPrimary }]}>Storage usage</Text>
+            <Text style={[styles.usageMeta, { color: colors.textSecondary }]}>
+              {formatBytes(totalBytes)} of {formatBytes(totalQuota)}
+            </Text>
+          </View>
+          <View style={[styles.usageBadge, { backgroundColor: colors.primary50 }]}>
+            <Text style={[styles.usageBadgeText, { color: colors.primary700 }]}>
+              {files.length} files
+            </Text>
+          </View>
+        </View>
+        <View style={[styles.progressTrack, { backgroundColor: colors.surfaceVariant, marginTop: spacing.md }]}>
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${Math.round(usageRatio * 100)}%`, backgroundColor: colors.primary }
+            ]}
+          />
+        </View>
+        <Text style={[styles.usageHint, { color: colors.textTertiary }]}>
+          Last sync {new Date().toLocaleTimeString()}
+        </Text>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.outline, borderBottomWidth: 0, borderBottomLeftRadius: 16, borderBottomRightRadius: 16 }]}>
+        <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Your Files</Text>
+        <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+          Encrypted at rest. Only you can access them.
+        </Text>
+
+        {uploadProgress > 0 ? (
+          <View style={styles.progressRow}>
+            <Text style={[styles.progressText, { color: colors.textSecondary }]}>
+              {Math.round(uploadProgress * 100)}%
+            </Text>
+            <View style={[styles.progressTrack, { backgroundColor: colors.surfaceVariant }]}>
+              <View
+                style={[
+                  styles.progressFill,
+                  { width: `${Math.round(uploadProgress * 100)}%`, backgroundColor: colors.primary }
+                ]}
+              />
+            </View>
+          </View>
+        ) : null}
+        {encryptingName ? (
+          <Text style={[styles.encryptNote, { color: colors.textSecondary }]}>
+            {encrypting ? "Encrypting" : "Encrypted"}: {encryptingName}
+          </Text>
+        ) : null}
+
+        <View style={styles.sortRow}>
+          {[
+            { key: "recent", label: "Recent" },
+            { key: "name", label: "Name" },
+            { key: "size", label: "Size" }
+          ].map((item) => (
+            <TouchableOpacity
+              key={item.key}
+              style={[
+                styles.sortChip,
+                {
+                  backgroundColor: sortBy === item.key ? colors.primary : colors.primary50,
+                  borderColor: colors.outline
+                }
+              ]}
+              onPress={() => setSortBy(item.key)}
+            >
+              <Text
+                style={{
+                  color: sortBy === item.key ? colors.surface : colors.primary700,
+                  fontSize: 12,
+                  fontWeight: "600"
+                }}
+              >
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        {filteredFiles.length === 0 && (
+          <View style={[styles.emptyState, { backgroundColor: colors.surfaceVariant }]}>
+            <View style={styles.emptyIcon}>
+              <Feather name="upload-cloud" size={18} color={colors.primary700} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>
+              {query ? "No matches found" : "No files yet"}
+            </Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+              {query ? "Try a different search term." : "Upload your first file to get started."}
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+
+  const renderFooter = () => (
+    <View style={styles.footerContainer}>
+      <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.outline }]}>
+        <Feather name="search" size={16} color={colors.textTertiary} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.textPrimary }]}
+          placeholder="Search files"
+          placeholderTextColor={colors.textTertiary}
+          value={query}
+          onChangeText={(value) => setQuery(value)}
+        />
+        {query ? (
+          <TouchableOpacity
+            onPress={() => setQuery("")}
+            style={[styles.clearButton, { backgroundColor: colors.primary50 }]}
+          >
+            <Feather name="x" size={14} color={colors.primary700} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {notice ? (
+        <Text style={[styles.noticeText, { color: colors.textSecondary }]}>{notice}</Text>
+      ) : null}
+
+      {recentFiles.length > 0 ? (
+        <View style={[styles.recentWrap, { backgroundColor: colors.surfaceVariant }]}>
+          <Text style={[styles.recentTitle, { color: colors.textPrimary }]}>
+            Recent uploads
+          </Text>
+          {recentFiles.map((file) => (
+            <View key={file.fileId} style={styles.recentRow}>
+              <Feather name="file" size={14} color={colors.textTertiary} />
+              <View style={styles.recentInfo}>
+                <Text style={[styles.recentText, { color: colors.textSecondary }]}>
+                  {file.originalName}
+                </Text>
+                <Text style={[styles.recentMeta, { color: colors.textTertiary }]}>
+                  {(file.sizeBytes / 1024).toFixed(1)} KB -{" "}
+                  {new Date(file.createdAt).toLocaleDateString()}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.downloadButton,
+                  { backgroundColor: colors.primary50, marginLeft: "auto" }
+                ]}
+                onPress={() => handleDownload(file)}
+              >
+                <Feather name="download" size={14} color={colors.primary700} />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+
+  const renderFileItem = ({ item: file }) => (
+    <View style={[styles.fileRowWrapper, { backgroundColor: colors.surface, paddingHorizontal: spacing.lg, borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.outline }]}>
+      <View
+        key={file.fileId}
+        style={[styles.fileRow, { borderBottomColor: colors.outline }]}
+      >
+        <TouchableOpacity
+          style={styles.fileInfo}
+          onPress={() =>
+            navigation.navigate("FileDetail", {
+              fileId: file.fileId,
+              fileName: file.originalName
+            })
+          }
+        >
+          <View style={styles.fileTitleRow}>
+            <Feather
+              name={getFileIcon(file.originalName)}
+              size={14}
+              color={colors.textTertiary}
+              style={styles.fileTitleIcon}
+            />
+            <Text style={[styles.fileName, { color: colors.textPrimary }]}>
+              {file.originalName}
+            </Text>
+          </View>
+          <View style={styles.fileMetaRow}>
+            <Feather
+              name="clock"
+              size={12}
+              color={colors.textTertiary}
+              style={styles.fileMetaIcon}
+            />
+            <Text style={[styles.fileMeta, { color: colors.textTertiary }]}>
+              {(file.sizeBytes / 1024).toFixed(1)} KB - {new Date(file.createdAt).toLocaleString()}
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <View style={styles.fileActions}>
+          <TouchableOpacity
+            style={[styles.downloadButton, { backgroundColor: colors.primary50 }]}
+            onPress={() => handleDownload(file)}
+          >
+            <Feather name="download" size={14} color={colors.primary700} />
+          </TouchableOpacity>
+          <Text
+            style={[
+              styles.badge,
+              { color: colors.badgeText, backgroundColor: colors.badgeBg }
+            ]}
+          >
+            Encrypted
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
 
   return (
     <Screen>
@@ -319,245 +566,20 @@ export default function FilesScreen({ navigation }) {
           ]}
         />
       </View>
-      <ScrollView
+      
+      <FlatList
+        data={sortedFiles}
+        keyExtractor={(item) => item.fileId}
+        renderItem={renderFileItem}
+        ListHeaderComponent={renderHeader}
+        ListFooterComponent={renderFooter}
         contentContainerStyle={styles.wrap}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-      >
-        <Animated.View style={[styles.heroHeader, { opacity: heroFade, transform: [{ scale: heroScale }] }]}>
-          <Text
-            style={[
-              styles.overline,
-              { color: colors.primary700, fontWeight: "700", letterSpacing: 0.4 }
-            ]}
-          >
-            Secura
-          </Text>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>Secure file vault</Text>
-          <Text style={[styles.caption, { color: colors.textSecondary }]}>
-            Built for privacy, clarity, and control on the go.
-          </Text>
-          <View style={styles.heroActions}>
-            <PrimaryButton title="Upload File" onPress={handleUpload} disabled={busy} />
-            {successNote ? (
-              <View style={[styles.successChip, { backgroundColor: colors.badgeBg }]}>
-                <Feather name="check" size={14} color={colors.badgeText} />
-                <Text style={[styles.successText, { color: colors.badgeText, marginLeft: 6 }]}>
-                  {successNote}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        </Animated.View>
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+      />
 
-        <View style={[styles.usageCard, { backgroundColor: colors.surface, borderColor: colors.outline }]}>
-          <View style={styles.usageHeader}>
-            <View>
-              <Text style={[styles.usageTitle, { color: colors.textPrimary }]}>Storage usage</Text>
-              <Text style={[styles.usageMeta, { color: colors.textSecondary }]}>
-                {formatBytes(totalBytes)} of {formatBytes(totalQuota)}
-              </Text>
-            </View>
-            <View style={[styles.usageBadge, { backgroundColor: colors.primary50 }]}>
-              <Text style={[styles.usageBadgeText, { color: colors.primary700 }]}>
-                {files.length} files
-              </Text>
-            </View>
-          </View>
-          <View style={[styles.progressTrack, { backgroundColor: colors.surfaceVariant, marginTop: spacing.md }]}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${Math.round(usageRatio * 100)}%`, backgroundColor: colors.primary }
-              ]}
-            />
-          </View>
-          <Text style={[styles.usageHint, { color: colors.textTertiary }]}>
-            Last sync {new Date().toLocaleTimeString()}
-          </Text>
-        </View>
-
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.outline }]}>
-          <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Your Files</Text>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Encrypted at rest. Only you can access them.
-          </Text>
-
-          {uploadProgress > 0 ? (
-            <View style={styles.progressRow}>
-              <Text style={[styles.progressText, { color: colors.textSecondary }]}>
-                {Math.round(uploadProgress * 100)}%
-              </Text>
-              <View style={[styles.progressTrack, { backgroundColor: colors.surfaceVariant }]}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: `${Math.round(uploadProgress * 100)}%`, backgroundColor: colors.primary }
-                  ]}
-                />
-              </View>
-            </View>
-          ) : null}
-          {encryptingName ? (
-            <Text style={[styles.encryptNote, { color: colors.textSecondary }]}>
-              {encrypting ? "Encrypting" : "Encrypted"}: {encryptingName}
-            </Text>
-          ) : null}
-
-          <View style={styles.sortRow}>
-            {[
-              { key: "recent", label: "Recent" },
-              { key: "name", label: "Name" },
-              { key: "size", label: "Size" }
-            ].map((item) => (
-              <TouchableOpacity
-                key={item.key}
-                style={[
-                  styles.sortChip,
-                  {
-                    backgroundColor: sortBy === item.key ? colors.primary : colors.primary50,
-                    borderColor: colors.outline
-                  }
-                ]}
-                onPress={() => setSortBy(item.key)}
-              >
-                <Text
-                  style={{
-                    color: sortBy === item.key ? colors.surface : colors.primary700,
-                    fontSize: 12,
-                    fontWeight: "600"
-                  }}
-                >
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {filteredFiles.length === 0 ? (
-            <View style={[styles.emptyState, { backgroundColor: colors.surfaceVariant }]}>
-              <View style={styles.emptyIcon}>
-                <Feather name="upload-cloud" size={18} color={colors.primary700} />
-              </View>
-              <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>
-                {query ? "No matches found" : "No files yet"}
-              </Text>
-              <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                {query ? "Try a different search term." : "Upload your first file to get started."}
-              </Text>
-            </View>
-          ) : (
-            sortedFiles.map((file) => (
-              <View
-                key={file.fileId}
-                style={[styles.fileRow, { borderBottomColor: colors.outline }]}
-              >
-                <TouchableOpacity
-                  style={styles.fileInfo}
-                  onPress={() =>
-                    navigation.navigate("FileDetail", {
-                      fileId: file.fileId,
-                      fileName: file.originalName
-                    })
-                  }
-                >
-                  <View style={styles.fileTitleRow}>
-                    <Feather
-                      name={getFileIcon(file.originalName)}
-                      size={14}
-                      color={colors.textTertiary}
-                      style={styles.fileTitleIcon}
-                    />
-                    <Text style={[styles.fileName, { color: colors.textPrimary }]}>
-                      {file.originalName}
-                    </Text>
-                  </View>
-                  <View style={styles.fileMetaRow}>
-                    <Feather
-                      name="clock"
-                      size={12}
-                      color={colors.textTertiary}
-                      style={styles.fileMetaIcon}
-                    />
-                    <Text style={[styles.fileMeta, { color: colors.textTertiary }]}>
-                      {(file.sizeBytes / 1024).toFixed(1)} KB - {new Date(file.createdAt).toLocaleString()}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-                <View style={styles.fileActions}>
-                  <TouchableOpacity
-                    style={[styles.downloadButton, { backgroundColor: colors.primary50 }]}
-                    onPress={() => handleDownload(file)}
-                  >
-                    <Feather name="download" size={14} color={colors.primary700} />
-                  </TouchableOpacity>
-                  <Text
-                    style={[
-                      styles.badge,
-                      { color: colors.badgeText, backgroundColor: colors.badgeBg }
-                    ]}
-                  >
-                    Encrypted
-                  </Text>
-                </View>
-              </View>
-            ))
-          )}
-
-        </View>
-
-        <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.outline }]}>
-          <Feather name="search" size={16} color={colors.textTertiary} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.textPrimary }]}
-            placeholder="Search files"
-            placeholderTextColor={colors.textTertiary}
-            value={query}
-            onChangeText={(value) => setQuery(value)}
-          />
-          {query ? (
-            <TouchableOpacity
-              onPress={() => setQuery("")}
-              style={[styles.clearButton, { backgroundColor: colors.primary50 }]}
-            >
-              <Feather name="x" size={14} color={colors.primary700} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        {notice ? (
-          <Text style={[styles.noticeText, { color: colors.textSecondary }]}>{notice}</Text>
-        ) : null}
-
-        {recentFiles.length > 0 ? (
-          <View style={[styles.recentWrap, { backgroundColor: colors.surfaceVariant }]}>
-            <Text style={[styles.recentTitle, { color: colors.textPrimary }]}>
-              Recent uploads
-            </Text>
-            {recentFiles.map((file) => (
-              <View key={file.fileId} style={styles.recentRow}>
-                <Feather name="file" size={14} color={colors.textTertiary} />
-                <View style={styles.recentInfo}>
-                  <Text style={[styles.recentText, { color: colors.textSecondary }]}>
-                    {file.originalName}
-                  </Text>
-                  <Text style={[styles.recentMeta, { color: colors.textTertiary }]}>
-                    {(file.sizeBytes / 1024).toFixed(1)} KB -{" "}
-                    {new Date(file.createdAt).toLocaleDateString()}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={[
-                    styles.downloadButton,
-                    { backgroundColor: colors.primary50, marginLeft: "auto" }
-                  ]}
-                  onPress={() => handleDownload(file)}
-                >
-                  <Feather name="download" size={14} color={colors.primary700} />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        ) : null}
-      </ScrollView>
       <FabMenu
         onNavigate={(target) => navigation.navigate(target)}
         onQuickUpload={handleUpload}
@@ -572,6 +594,13 @@ const styles = StyleSheet.create({
   wrap: {
     paddingTop: spacing.lg,
     paddingBottom: spacing.xxxl
+  },
+  headerContainer: {
+    // Container for header components
+  },
+  footerContainer: {
+    paddingHorizontal: 0,
+    marginTop: spacing.md
   },
   blobLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -732,6 +761,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center"
+  },
+  fileRowWrapper: {
+    // Wrapper for FlatList item
   },
   fileInfo: {
     flex: 1,

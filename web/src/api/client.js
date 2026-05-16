@@ -29,6 +29,14 @@ export function guestLogin() {
   return request("/auth/guest", { method: "POST" });
 }
 
+export function googleAuth(credential) {
+  return request("/auth/google-auth", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential })
+  });
+}
+
 export function fetchFiles(token, page = 1, pageSize = 50) {
   return request(`/files?page=${page}&page_size=${pageSize}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -93,6 +101,17 @@ export function uploadFileWithProgress(token, file, onProgress) {
 
     xhr.onerror = () => reject(new Error("Network error"));
     xhr.send(form);
+  });
+}
+
+export function registerMetadata(token, metadata) {
+  return request("/files/register-metadata", {
+    method: "POST",
+    headers: { 
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(metadata)
   });
 }
 

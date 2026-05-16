@@ -1,180 +1,376 @@
+import { GoogleLogin } from "@react-oauth/google";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  API_BASE,
-  downloadEncryptedFile,
-  createShareLink,
-  fetchShareLinks,
-  revokeShareLink,
-  fetchActivity,
-  fetchAdminAudit,
-  fetchAdminUsers,
-  fetchAdminShares,
-  fetchAdminSummary,
-  fetchAnalytics,
-  fetchFiles,
-  exportAuditCsv,
+  encryptBuffer,
+  decryptBuffer,
+  triggerDownload
+} from "./api/crypto";
+import {
+  googleAuth,
   guestLogin,
-  login,
-  register,
-  uploadFileWithProgress,
-  deleteFile,
-  adminRevokeShare,
-  adminToggleUser,
-  adminExportCsv,
-  changePassword
+  registerMetadata
 } from "./api/client";
 
 const STORAGE_KEY = "secura_web_session";
 const THEME_KEY = "secura_web_theme";
 const SPLASH_KEY = "secura_web_seen_splash";
 const LOCAL_FILES_KEY = "secura_web_files";
-const LOCAL_ACTIVITY_KEY = "secura_web_activity";
-
-// In-memory store for file blobs uploaded in demo/offline mode.
-// These are only available for the current browser session.
-const demoFileBlobs = new Map();
+const LOCAL_NOTES_KEY = "secura_web_notes";
+const DECOY_KEY = "secura_web_decoy";
 
 const initialState = {
   token: "",
   user: null,
   files: [],
-  activity: [],
-  adminUsers: [],
-  adminLogs: [],
+  notes: [],
+  decoyPassword: "", // For plausible deniability
   loading: false,
   error: "",
   notice: ""
 };
 
-const themeOptions = ["system", "light", "dark"];
+const themeOptions = ["light", "dark", "system"];
 
 export default function App() {
   const [state, setState] = useState(initialState);
-  const [adminSummary, setAdminSummary] = useState(null);
-  const [adminShares, setAdminShares] = useState([]);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState("login");
-  const [activeTab, setActiveTab] = useState("files");
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadStage, setUploadStage] = useState("Idle");
-  const [encryptingName, setEncryptingName] = useState("");
-  const [uploadComplete, setUploadComplete] = useState("");
-  const [analytics, setAnalytics] = useState(null);
+  const [activeTab, setActiveTab] = useState("home");
   const [toasts, setToasts] = useState([]);
-  const [favorites, setFavorites] = useState({});
-  const [fileTags, setFileTags] = useState({});
-  const [page, setPage] = useState(1);
-  const pageSize = 6;
-  const [query, setQuery] = useState("");
-  const [sortBy, setSortBy] = useState("recent");
-  const [activityQuery, setActivityQuery] = useState("");
-  const [activityFilter, setActivityFilter] = useState("all");
-  const [theme, setTheme] = useState("system");
+  const [theme, setTheme] = useState("light"); 
   const [showSplash, setShowSplash] = useState(true);
-  const [fabOpen, setFabOpen] = useState(false);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [activeFile, setActiveFile] = useState(null);
-  const [dragActive, setDragActive] = useState(false);
-  const [tagInput, setTagInput] = useState("");
-  const [shareLinks, setShareLinks] = useState([]);
-  const [shareLoading, setShareLoading] = useState(false);
-  const [pwCurrent, setPwCurrent] = useState("");
-  const [pwNew, setPwNew] = useState("");
-  const [pwMsg, setPwMsg] = useState({ text: "", type: "" });
-  const [pwLoading, setPwLoading] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const [settings, setSettings] = useState({
-    autoLock: true,
-    biometrics: false,
-    notifications: true,
-    privacyShield: true,
-    clipboardTimeout: true,
-    haptics: true,
-    reduceMotion: false
-  });
+  
+  // Security Vault State
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const [vaultPassword, setVaultPassword] = useState("");
+  const [vaultAction, setVaultAction] = useState(null); // { type: 'encrypt'|'decrypt'|'note', payload: any }
+  
+  const [decryptFile, setDecryptFile] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [cryptoLogs, setCryptoLogs] = useState([]);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [decryptedNotePreview, setDecryptedNotePreview] = useState(null);
 
-  const team = [
-    {
-      name: "Umang Gupta",
-      role: "Team Lead",
-      focus: "Security architecture & product direction",
-      accent: "accent-sky"
-    },
-    {
-      name: "Tribhuvan Pratap Singh",
-      role: "Backend Engineer",
-      focus: "API, encryption flow, and audit trails",
-      accent: "accent-mint"
-    },
-    {
-      name: "Vineet Vikram Rao",
-      role: "Frontend Engineer",
-      focus: "UX flows, dashboards, and data clarity",
-      accent: "accent-amber"
-    },
-    {
-      name: "Vaishnavendra Dhar Dwivedi",
-      role: "Security Analyst",
-      focus: "Threat modeling and access control",
-      accent: "accent-lilac"
-    },
-    {
-      name: "Vipul Kumar",
-      role: "Platform Engineer",
-      focus: "Deployment, performance, and reliability",
-      accent: "accent-rose"
+  // Notes state
+  const [noteText, setNoteText] = useState("");
+  const [isNoteProcessing, setIsNoteProcessing] = useState(false);
+
+  const isAuthenticated = !!state.token;
+
+  // --- Handlers ---
+  
+  function addCryptoLog(msg) {
+    const time = new Date().toLocaleTimeString().split(' ')[0];
+    setCryptoLogs(prev => [`[${time}] ${msg}`, ...prev].slice(0, 5));
+  }
+
+  function openVault(type, payload = null) {
+    setVaultAction({ type, payload });
+    setVaultPassword("");
+    setVaultOpen(true);
+  }
+
+  async function processVault() {
+    if (!vaultPassword) return;
+    setVaultOpen(false);
+    
+    // Decoy Logic: If user enters the decoy password during decryption, 
+    // we show a fake success but don't actually restore the file.
+    if (vaultAction?.type === 'decrypt' && state.decoyPassword && vaultPassword === state.decoyPassword) {
+      addCryptoLog("Decoy protocol active...");
+      setIsProcessing(true);
+      setTimeout(() => {
+        addCryptoLog("Error: Secure container corrupted or invalid key.");
+        pushToast("Restoration failed. Container integrity error.", "error");
+        setIsProcessing(false);
+      }, 1500);
+      return;
     }
-  ];
 
-  const uploadInputRef = useRef(null);
-  const isAdmin = state.user?.role === "admin";
+    const { type, payload } = vaultAction;
+    if (type === 'encrypt') await handleEncrypt(payload, vaultPassword);
+    if (type === 'decrypt') await handleDecrypt(vaultPassword);
+    if (type === 'note') await handleSaveNote(vaultPassword);
+  }
+
+  async function handleEncrypt(file, password) {
+    if (!file) return;
+    setIsProcessing(true);
+    pushToast("Securing resource...", "info");
+    setCryptoLogs([]); 
+    try {
+      addCryptoLog("Initializing PBKDF2 Key Derivation...");
+      const buffer = await file.arrayBuffer();
+      
+      addCryptoLog("Applying AES-GCM encryption...");
+      const encrypted = await encryptBuffer(buffer, password);
+      
+      addCryptoLog("Computing integrity checksum...");
+      const hashBuffer = await window.crypto.subtle.digest("SHA-256", buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const checksum = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      addCryptoLog("Syncing metadata with Secura Cloud...");
+      try {
+        if (state.token) {
+          await registerMetadata(state.token, {
+            original_name: file.name,
+            size_bytes: buffer.byteLength,
+            checksum: checksum
+          });
+          addCryptoLog("Metadata synced successfully.");
+        }
+      } catch (e) {
+        addCryptoLog("Cloud sync failed (offline mode).");
+      }
+      
+      triggerDownload(encrypted, `${file.name}.secura`);
+      addCryptoLog("Secure container downloaded.");
+      pushToast("Success! File secured with password.", "success");
+
+      const newFile = {
+        fileId: Math.random().toString(36).substr(2, 9),
+        originalName: file.name,
+        sizeBytes: buffer.byteLength,
+        createdAt: new Date().toISOString()
+      };
+      const updatedFiles = [newFile, ...state.files].slice(0, 10);
+      setState(s => ({ ...s, files: updatedFiles }));
+      localStorage.setItem(LOCAL_FILES_KEY, JSON.stringify(updatedFiles));
+
+    } catch (err) {
+      addCryptoLog("Error: " + err.message);
+      pushToast("Security operation failed", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setIsDragActive(false);
+    const file = e.dataTransfer.files[0];
+    if (file) openVault('encrypt', file);
+  };
+
+  async function handleDecrypt(password) {
+    if (!decryptFile) return;
+    setIsProcessing(true);
+    setDecryptedNotePreview(null);
+    pushToast("Processing secure resource...", "info");
+    setCryptoLogs([]);
+    try {
+      addCryptoLog("Extracting Salt and IV...");
+      const buffer = await decryptFile.arrayBuffer();
+      
+      addCryptoLog("Deriving key from password...");
+      const decrypted = await decryptBuffer(buffer, password);
+      addCryptoLog("Decryption successful.");
+      
+      // Smart Note Handling
+      if (decryptFile.name.includes("Note_") || decrypted.byteLength < 5000) {
+        try {
+          const text = new TextDecoder().decode(decrypted);
+          if (/^[\x20-\x7E\s]*$/.test(text.slice(0, 100))) {
+             setDecryptedNotePreview(text);
+             addCryptoLog("Note preview generated.");
+             pushToast("Note decrypted! Preview below.", "success");
+             setIsProcessing(false);
+             return;
+          }
+        } catch(_) {}
+      }
+
+      const originalName = decryptFile.name.replace(".secura", "");
+      triggerDownload(decrypted, originalName);
+      addCryptoLog("Resource restored to device.");
+      pushToast("Decryption successful!", "success");
+      setDecryptFile(null);
+    } catch (err) {
+      addCryptoLog("Error: Authentication failed.");
+      pushToast("Decryption failed. Wrong password?", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleSaveNote(password) {
+    if (!noteText.trim()) return;
+    setIsNoteProcessing(true);
+    pushToast("Securing note locally...", "info");
+    try {
+      const encodedNote = new TextEncoder().encode(noteText);
+      const encrypted = await encryptBuffer(encodedNote, password);
+
+      const hashBuffer = await window.crypto.subtle.digest("SHA-256", encodedNote);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const checksum = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      const baseName = `SecuraNote_${new Date().getTime()}`;
+
+      try {
+        if (state.token) {
+          await registerMetadata(state.token, {
+            original_name: baseName,
+            size_bytes: encodedNote.byteLength,
+            checksum: checksum
+          });
+        }
+      } catch (e) {}
+      
+      triggerDownload(encrypted, `${baseName}.secura`);
+      
+      const newNote = {
+        id: Math.random().toString(36).substr(2, 9),
+        title: baseName,
+        createdAt: new Date().toISOString()
+      };
+      const updatedNotes = [newNote, ...state.notes].slice(0, 10);
+      setState(s => ({ ...s, notes: updatedNotes }));
+      localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(updatedNotes));
+      
+      setNoteText("");
+      pushToast("Note secured with password!", "success");
+    } catch (err) {
+      pushToast("Failed to secure note", "error");
+    } finally {
+      setIsNoteProcessing(false);
+    }
+  }
+
+  // --- Components ---
+  function SecurityVaultModal() {
+    if (!vaultOpen) return null;
+
+    // Calculate password strength
+    const strength = useMemo(() => {
+      if (!vaultPassword) return 0;
+      let score = 0;
+      if (vaultPassword.length > 8) score += 25;
+      if (/[A-Z]/.test(vaultPassword)) score += 25;
+      if (/[0-9]/.test(vaultPassword)) score += 25;
+      if (/[^A-Za-z0-9]/.test(vaultPassword)) score += 25;
+      return score;
+    }, [vaultPassword]);
+
+    const strengthColor = strength < 50 ? "#ef4444" : strength < 75 ? "#f59e0b" : "#10b981";
+
+    return (
+      <div className="modal-overlay">
+        <div className="modal-content panel-animate">
+          <div className="item-icon-box" style={{ margin: "0 auto 16px", background: "var(--primary)", color: "white" }}>
+            <Icon name="lock" size={32} />
+          </div>
+          <h2 className="item-title" style={{ textAlign: "center", fontSize: 20 }}>Security Vault</h2>
+          <p className="description-text" style={{ textAlign: "center", marginBottom: 24 }}>
+            {vaultAction?.type === 'encrypt' ? "Set a password to protect this file." : 
+             vaultAction?.type === 'decrypt' ? "Enter password to restore this file." : 
+             "Set a password for this secure note."}
+          </p>
+          <input 
+            type="password" 
+            className="note-input-area" 
+            style={{ height: "52px", marginBottom: "8px", textAlign: "center", fontSize: "18px", letterSpacing: "4px" }} 
+            placeholder="••••••••" 
+            value={vaultPassword}
+            onChange={e => setVaultPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && processVault()}
+            autoFocus
+          />
+          <div style={{ height: "4px", width: "100%", background: "rgba(0,0,0,0.05)", borderRadius: "2px", marginBottom: "20px", overflow: "hidden" }}>
+             <div style={{ height: "100%", width: `${strength}%`, background: strengthColor, transition: "width 0.3s ease, background 0.3s ease" }}></div>
+          </div>
+          <div style={{ display: "flex", gap: "12px" }}>
+            <button className="secondary-btn" style={{ flex: 1 }} onClick={() => setVaultOpen(false)}>Cancel</button>
+            <button className="primary-btn" style={{ flex: 2 }} onClick={processVault}>Confirm</button>
+          </div>
+          <p style={{ fontSize: "11px", opacity: 0.5, marginTop: "16px", textAlign: "center" }}>
+            Secura uses Zero-Knowledge encryption. We never see your password.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  async function handleGoogleSuccess(response) {
+    setState((s) => ({ ...s, loading: true, error: "" }));
+    try {
+      const data = await googleAuth(response.credential);
+      setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
+      pushToast("Signed in with Google", "success");
+    } catch (err) {
+      setState((s) => ({ ...s, loading: false, error: "Google Sign-In failed" }));
+    }
+  }
+
+  async function handleGuest() {
+    setState((s) => ({ ...s, loading: true, error: "" }));
+    try {
+      const data = await guestLogin();
+      setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
+      pushToast("Guest session established", "info");
+    } catch {
+      setState((s) => ({
+        ...s,
+        loading: false,
+        token: "offline-guest",
+        user: { email: "guest@offline", role: "guest" }
+      }));
+      pushToast("Local guest session started", "info");
+    }
+  }
+
+  function signOut() {
+    setState(initialState);
+    localStorage.removeItem(STORAGE_KEY);
+    pushToast("Signed out", "info");
+  }
+
+  function pushToast(message, type = "info") {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts((list) => [...list, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((list) => list.filter((t) => t.id !== id));
+    }, 3000);
+  }
+
+  // --- Effects ---
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     const savedTheme = localStorage.getItem(THEME_KEY);
     const seenSplash = localStorage.getItem(SPLASH_KEY) === "1";
-    const savedFavorites = localStorage.getItem("secura_web_favorites");
-    const savedTags = localStorage.getItem("secura_web_tags");
-    if (savedTheme && themeOptions.includes(savedTheme)) {
-      setTheme(savedTheme);
+    const savedFiles = localStorage.getItem(LOCAL_FILES_KEY);
+    const savedNotes = localStorage.getItem(LOCAL_NOTES_KEY);
+    const savedDecoy = localStorage.getItem(DECOY_KEY);
+
+    if (savedTheme) setTheme(savedTheme);
+    
+    let initialFiles = [];
+    if (savedFiles) {
+      try { initialFiles = JSON.parse(savedFiles); } catch(_) {}
     }
+    
+    let initialNotes = [];
+    if (savedNotes) {
+      try { initialNotes = JSON.parse(savedNotes); } catch(_) {}
+    }
+
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed?.token) {
-          setState((s) => ({ ...s, token: parsed.token, user: parsed.user || null }));
-        }
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
+        if (parsed?.token) setState((s) => ({ ...s, ...parsed, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
+      } catch { 
+        setState(s => ({ ...s, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
+        localStorage.removeItem(STORAGE_KEY); 
       }
+    } else {
+      setState(s => ({ ...s, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
     }
-    if (seenSplash) {
-      setShowSplash(false);
-    }
-    if (savedFavorites) {
-      try {
-        setFavorites(JSON.parse(savedFavorites));
-      } catch {
-        localStorage.removeItem("secura_web_favorites");
-      }
-    }
-    if (savedTags) {
-      try {
-        setFileTags(JSON.parse(savedTags));
-      } catch {
-        localStorage.removeItem("secura_web_tags");
-      }
-    }
+
+    if (seenSplash) setShowSplash(false);
   }, []);
 
   useEffect(() => {
-    if (state.token) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: state.token, user: state.user }));
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
+    if (state.token) localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: state.token, user: state.user }));
   }, [state.token, state.user]);
 
   useEffect(() => {
@@ -183,78 +379,8 @@ export default function App() {
     if (theme === "system") {
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       root.dataset.theme = prefersDark ? "dark" : "light";
-    } else {
-      root.dataset.theme = theme;
-    }
+    } else { root.dataset.theme = theme; }
   }, [theme]);
-
-  useEffect(() => {
-    localStorage.setItem("secura_web_favorites", JSON.stringify(favorites));
-  }, [favorites]);
-
-  useEffect(() => {
-    localStorage.setItem("secura_web_tags", JSON.stringify(fileTags));
-  }, [fileTags]);
-
-  // ── Auto-lock: sign out after 2 min of inactivity ───────────────────────────
-  useEffect(() => {
-    if (!settings.autoLock || !state.token || isDemo()) return;
-
-    const IDLE_MS = 2 * 60 * 1000;
-    let timer = setTimeout(() => {
-      signOut();
-      pushToast("Signed out due to inactivity.", "info");
-    }, IDLE_MS);
-
-    function resetTimer() {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        signOut();
-        pushToast("Signed out due to inactivity.", "info");
-      }, IDLE_MS);
-    }
-
-    const events = ["mousemove", "keydown", "pointerdown", "touchstart", "scroll"];
-    events.forEach((e) => window.addEventListener(e, resetTimer, { passive: true }));
-    return () => {
-      clearTimeout(timer);
-      events.forEach((e) => window.removeEventListener(e, resetTimer));
-    };
-  }, [settings.autoLock, state.token]);
-
-
-  function readLocalFiles() {
-    try {
-      return JSON.parse(localStorage.getItem(LOCAL_FILES_KEY) || "[]");
-    } catch {
-      return [];
-    }
-  }
-
-  function writeLocalFiles(files) {
-    localStorage.setItem(LOCAL_FILES_KEY, JSON.stringify(files));
-  }
-
-  function readLocalActivity() {
-    try {
-      return JSON.parse(localStorage.getItem(LOCAL_ACTIVITY_KEY) || "[]");
-    } catch {
-      return [];
-    }
-  }
-
-  function writeLocalActivity(logs) {
-    localStorage.setItem(LOCAL_ACTIVITY_KEY, JSON.stringify(logs));
-  }
-
-  function isDemo() {
-    return !state.token || state.token === "offline-guest";
-  }
-
-  function newId() {
-    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-    return `local-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-  }
 
   useEffect(() => {
     if (!showSplash) return;
@@ -265,1612 +391,268 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [showSplash]);
 
-  async function handleAuth(e) {
-    e.preventDefault();
-    setState((s) => ({ ...s, loading: true, error: "" }));
-    try {
-      const data = mode === "login" ? await login(email, password) : await register(email, password);
-      setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
-    } catch (err) {
-      setState((s) => ({ ...s, loading: false, error: err.message }));
-    }
-  }
+  const team = [
+    { name: "Umang Gupta", role: "Team Lead", focus: "Security architecture & direction", accent: "accent-sky" },
+    { name: "Tribhuvan Pratap Singh", role: "Backend Engineer", focus: "API & Encryption Flow", accent: "accent-mint" },
+    { name: "Vineet Vikram Rao", role: "Frontend Engineer", focus: "UX & Data Clarity", accent: "accent-amber" },
+    { name: "Vaishnavendra Dhar Dwivedi", role: "Security Analyst", focus: "Threat Modeling", accent: "accent-lilac" },
+    { name: "Vipul Kumar", role: "Platform Engineer", focus: "Performance & Reliability", accent: "accent-rose" }
+  ];
 
-  async function handleGuest() {
-    setState((s) => ({ ...s, loading: true, error: "", notice: "" }));
-    try {
-      const data = await guestLogin();
-      setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
-    } catch {
-      setState((s) => ({
-        ...s,
-        loading: false,
-        notice: "Offline guest mode enabled.",
-        token: "offline-guest",
-        user: { email: "guest@offline", role: "guest" }
-      }));
-    }
-  }
-
-  function signOut() {
-    setState(initialState);
-    setEmail("");
-    setPassword("");
-  }
-
-  function pushToast(message, type = "info") {
-    const id = newId();
-    setToasts((list) => [...list, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((list) => list.filter((toast) => toast.id !== id));
-    }, 2800);
-  }
-
-  async function loadFiles() {
-    if (isDemo()) {
-      const localFiles = readLocalFiles();
-      setState((s) => ({ ...s, files: localFiles, loading: false }));
-      return;
-    }
-    setState((s) => ({ ...s, loading: true, error: "" }));
-    try {
-      const data = await fetchFiles(state.token);
-      const items = Array.isArray(data) ? data : data.items || [];
-      setState((s) => ({ ...s, files: items, loading: false }));
-    } catch (err) {
-      const localFiles = readLocalFiles();
-      setState((s) => ({ ...s, files: localFiles, loading: false, error: err.message }));
-    }
-  }
-
-  async function loadActivity() {
-    if (isDemo()) {
-      const localLogs = readLocalActivity();
-      setState((s) => ({ ...s, activity: localLogs, loading: false }));
-      return;
-    }
-    setState((s) => ({ ...s, loading: true, error: "" }));
-    try {
-      const data = await fetchActivity(state.token);
-      const items = Array.isArray(data) ? data : data.items || [];
-      setState((s) => ({ ...s, activity: items, loading: false }));
-    } catch (err) {
-      const localLogs = readLocalActivity();
-      setState((s) => ({ ...s, activity: localLogs, loading: false, error: err.message }));
-    }
-  }
-
-  async function loadAnalytics() {
-    if (isDemo()) {
-      setAnalytics(computeLocalAnalytics(state.files, state.activity));
-      return;
-    }
-    try {
-      const data = await fetchAnalytics(state.token);
-      setAnalytics(data);
-    } catch {
-      setAnalytics(computeLocalAnalytics(state.files, state.activity));
-    }
-  }
-
-  async function handleFileUpload(file) {
-    if (!file) return;
-    setUploading(true);
-    setUploadProgress(0);
-    setUploadStage("Encrypting");
-    setEncryptingName(file.name || "selected file");
-    setUploadComplete("");
-    setState((s) => ({ ...s, notice: "Encrypting and uploading...", error: "" }));
-
-    if (isDemo()) {
-      let progress = 0;
-      const timer = setInterval(() => {
-        progress = Math.min(1, progress + 0.08);
-        setUploadProgress(progress);
-      }, 140);
-      setTimeout(() => {
-        setUploadStage("Finalizing");
-        clearInterval(timer);
-        const localFiles = readLocalFiles();
-        const entry = {
-          fileId: newId(),
-          originalName: file.name,
-          sizeBytes: file.size || 0,
-          createdAt: new Date().toISOString()
-        };
-        demoFileBlobs.set(entry.fileId, file);
-        const updated = [entry, ...localFiles];
-        writeLocalFiles(updated);
-        const logs = readLocalActivity();
-        logs.unshift({ id: newId(), action: "UPLOAD_FILE", timestamp: new Date().toISOString() });
-        writeLocalActivity(logs);
-        setState((s) => ({ ...s, files: updated, activity: logs, notice: "Upload complete." }));
-        setUploadComplete("Encryption complete. File secured.");
-        setTimeout(() => setUploadComplete(""), 1400);
-        setUploading(false);
-        setUploadProgress(0);
-        setUploadStage("Idle");
-        setEncryptingName("");
-      }, 1700);
-      pushToast("File uploaded (demo mode).", "success");
-      return;
-    }
-
-    try {
-      await uploadFileWithProgress(state.token, file, (progress) => {
-        setUploadProgress(progress);
-      });
-      setUploadStage("Finalizing");
-      setUploadComplete("Encryption complete. File secured.");
-      setTimeout(() => setUploadComplete(""), 1400);
-      setState((s) => ({ ...s, notice: "Upload complete." }));
-      await loadFiles();
-      pushToast("Upload complete.", "success");
-    } catch (err) {
-      setState((s) => ({ ...s, error: err.message }));
-      pushToast(err.message || "Upload failed.", "error");
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
-      setUploadStage("Idle");
-      setEncryptingName("");
-    }
-  }
-
-  function handleUpload(event) {
-    const file = event.target.files?.[0];
-    handleFileUpload(file);
-    event.target.value = "";
-  }
-
-  function openDetail(file) {
-    setActiveFile(file);
-    setDetailOpen(true);
-    setPreviewUrl(null);
-    if (state.token && state.token !== "offline-guest") {
-      loadShares(file.fileId);
-      if (fileIcon(file.originalName) === "IMG") {
-        fetch(`${API_BASE}/files/${file.fileId}/download`, {
-          headers: { Authorization: `Bearer ${state.token}` }
-        })
-          .then((res) => (res.ok ? res.blob() : Promise.reject()))
-          .then((blob) => setPreviewUrl(URL.createObjectURL(blob)))
-          .catch(() => setPreviewUrl(null));
-      }
-    }
-  }
-
-  function handleDrop(event) {
-    event.preventDefault();
-    setDragActive(false);
-    const file = event.dataTransfer?.files?.[0];
-    if (file) {
-      handleFileUpload(file);
-    }
-  }
-
-  async function handleDownloadWeb(file) {
-    if (isDemo()) {
-      const blob = demoFileBlobs.get(file.fileId);
-      if (!blob) {
-        pushToast("File content not available in this session. Re-upload to download.", "info");
-        return;
-      }
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = file.originalName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      const logs = readLocalActivity();
-      logs.unshift({ id: newId(), action: "DOWNLOAD_FILE", timestamp: new Date().toISOString() });
-      writeLocalActivity(logs);
-      setState((s) => ({ ...s, activity: logs }));
-      pushToast(`Downloaded ${file.originalName}`, "success");
-      return;
-    }
-    try {
-      await downloadEncryptedFile(state.token, file.fileId, file.originalName);
-      pushToast(`Encrypted download ready: ${file.originalName}.secura`, "success");
-    } catch (err) {
-      setState((s) => ({ ...s, error: err.message }));
-      pushToast(err.message || "Download failed.", "error");
-    }
-  }
-
-  function toggleFavorite(fileId) {
-    setFavorites((prev) => ({ ...prev, [fileId]: !prev[fileId] }));
-  }
-
-  function addTag(fileId, tag) {
-    const cleaned = tag.trim();
-    if (!cleaned) return;
-    setFileTags((prev) => {
-      const current = prev[fileId] || [];
-      if (current.includes(cleaned)) return prev;
-      return { ...prev, [fileId]: [...current, cleaned] };
-    });
-  }
-
-  function removeTag(fileId, tag) {
-    setFileTags((prev) => ({
-      ...prev,
-      [fileId]: (prev[fileId] || []).filter((item) => item !== tag)
-    }));
-  }
-
-  async function handleShare(file) {
-    if (isDemo()) {
-      pushToast("Share links require a backend session.", "info");
-      return;
-    }
-    try {
-      const data = await createShareLink(state.token, file.fileId);
-      const base = API_BASE.startsWith("http") ? API_BASE : `${window.location.origin}${API_BASE}`;
-      const absolute = `${base}${data.shareUrl}`;
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(absolute);
-        pushToast("Share link copied.", "success");
-        if (settings.clipboardTimeout) {
-          setTimeout(() => navigator.clipboard.writeText("").catch(() => {}), 60 * 1000);
-        }
-      } else {
-        window.prompt("Copy share link:", absolute);
-      }
-      await loadShares(file.fileId);
-    } catch (err) {
-      pushToast(err.message || "Share failed.", "error");
-    }
-  }
-
-  async function loadShares(fileId) {
-    setShareLoading(true);
-    try {
-      const data = await fetchShareLinks(state.token, fileId);
-      setShareLinks(data);
-    } catch {
-      setShareLinks([]);
-    } finally {
-      setShareLoading(false);
-    }
-  }
-
-  async function handleRevokeShare(token) {
-    try {
-      await revokeShareLink(state.token, token);
-      setShareLinks((links) => links.filter((item) => item.token !== token));
-      pushToast("Share link revoked.", "info");
-    } catch (err) {
-      pushToast(err.message || "Revoke failed.", "error");
-    }
-  }
-
-  async function handleDeleteFile(file) {    if (!window.confirm(`Delete "${file.originalName}"? This cannot be undone.`)) return;
-    if (isDemo()) {
-      demoFileBlobs.delete(file.fileId);
-      const updated = readLocalFiles().filter((f) => f.fileId !== file.fileId);
-      writeLocalFiles(updated);
-      const logs = readLocalActivity();
-      logs.unshift({ id: newId(), action: "DELETE_FILE", timestamp: new Date().toISOString() });
-      writeLocalActivity(logs);
-      setState((s) => ({ ...s, files: updated, activity: logs }));
-      if (detailOpen && activeFile?.fileId === file.fileId) setDetailOpen(false);
-      pushToast(`Deleted ${file.originalName}`, "info");
-      return;
-    }
-    try {
-      await deleteFile(state.token, file.fileId);
-      setState((s) => ({ ...s, files: s.files.filter((f) => f.fileId !== file.fileId) }));
-      if (detailOpen && activeFile?.fileId === file.fileId) setDetailOpen(false);
-      pushToast(`Deleted ${file.originalName}`, "success");
-    } catch (err) {
-      pushToast(err.message || "Delete failed.", "error");
-    }
-  }
-
-  async function loadAdmin() {
-    if (!state.token || !isAdmin) return;
-    setState((s) => ({ ...s, loading: true, error: "" }));
-    try {
-      const [users, logs, summary, shares] = await Promise.all([
-        fetchAdminUsers(state.token),
-        fetchAdminAudit(state.token),
-        fetchAdminSummary(state.token),
-        fetchAdminShares(state.token)
-      ]);
-      const logItems = Array.isArray(logs) ? logs : logs.items || [];
-      setState((s) => ({ ...s, adminUsers: users, adminLogs: logItems, loading: false }));
-      setAdminSummary(summary);
-      setAdminShares(shares || []);
-    } catch (err) {
-      setState((s) => ({ ...s, loading: false, error: err.message }));
-    }
-  }
-
-  async function handleAdminRevokeShare(shareToken) {
-    try {
-      await adminRevokeShare(state.token, shareToken);
-      setAdminShares((shares) => shares.filter((s) => s.token !== shareToken));
-      pushToast("Share link revoked.", "info");
-    } catch (err) {
-      pushToast(err.message || "Revoke failed.", "error");
-    }
-  }
-
-  async function handleAdminToggleUser(userId) {
-    try {
-      const data = await adminToggleUser(state.token, userId);
-      setState((s) => ({
-        ...s,
-        adminUsers: s.adminUsers.map((u) =>
-          u.id === userId ? { ...u, isActive: data.isActive } : u
-        )
-      }));
-      pushToast(data.isActive ? "User enabled." : "User disabled.", "info");
-    } catch (err) {
-      pushToast(err.message || "Failed to update user.", "error");
-    }
-  }
-
-  async function handleChangePassword(e) {
-    e.preventDefault();
-    if (!pwCurrent || !pwNew) {
-      setPwMsg({ text: "Both fields are required.", type: "error" });
-      return;
-    }
-    setPwLoading(true);
-    setPwMsg({ text: "", type: "" });
-    try {
-      await changePassword(state.token, pwCurrent, pwNew);
-      setPwMsg({ text: "Password updated successfully.", type: "success" });
-      setPwCurrent("");
-      setPwNew("");
-    } catch (err) {
-      setPwMsg({ text: err.message || "Failed to change password.", type: "error" });
-    } finally {
-      setPwLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (activeTab === "files") {
-      loadFiles();
-      loadAnalytics();
-    }
-    if (activeTab === "activity") {
-      loadActivity();
-    }
-    if (activeTab === "admin") {
-      loadAdmin();
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab !== "files") return;
-    if (isDemo()) {
-      setAnalytics(computeLocalAnalytics(state.files, state.activity));
-    }
-  }, [activeTab, state.files, state.activity, state.token]);
-
-  const filteredFiles = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    const list = state.files.filter((file) => {
-      const nameMatch = file.originalName.toLowerCase().includes(normalized);
-      const tags = fileTags[file.fileId] || [];
-      const tagMatch = tags.some((tag) => tag.toLowerCase().includes(normalized));
-      return nameMatch || tagMatch;
-    });
-    if (sortBy === "name") {
-      return [...list].sort((a, b) => a.originalName.localeCompare(b.originalName));
-    }
-    if (sortBy === "size") {
-      return [...list].sort((a, b) => b.sizeBytes - a.sizeBytes);
-    }
-    return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [state.files, query, sortBy]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, sortBy, state.files.length]);
-
-  const parsedActivity = useMemo(() => {
-    return state.activity.map((log) => {
-      const action = log.action || "";
-      const type = action.includes("UPLOAD")
-        ? "upload"
-        : action.includes("DOWNLOAD")
-          ? "download"
-          : action.includes("SHARE")
-            ? "share"
-          : action.includes("LOGIN") || action.includes("REGISTER")
-            ? "login"
-            : "other";
-      return {
-        id: log.id,
-        type,
-        label:
-          action === "UPLOAD_FILE"
-            ? "Uploaded a file"
-            : action === "DOWNLOAD_FILE"
-              ? "Downloaded a file"
-              : action === "SHARE_CREATED"
-                ? "Created a share link"
-                : action === "SHARE_DOWNLOADED"
-                  ? "Shared link downloaded"
-                  : action === "SHARE_REVOKED"
-                    ? "Revoked a share link"
-              : action === "LOGIN"
-                ? "Signed in to Secura"
-                : action === "REGISTER"
-                  ? "Created an account"
-                  : action,
-        time: new Date(log.timestamp).toLocaleString()
-      };
-    });
-  }, [state.activity]);
-
-  const filteredActivity = parsedActivity.filter((item) => {
-    const matchesFilter = activityFilter === "all" || item.type === activityFilter;
-    const matchesQuery = item.label.toLowerCase().includes(activityQuery.trim().toLowerCase());
-    return matchesFilter && matchesQuery;
-  });
-
-  const recentFiles = useMemo(() => state.files.slice(0, 4), [state.files]);
-  const analyticsSeries = analytics?.activitySeries || [];
-  const maxUploads = analyticsSeries.reduce((max, item) => Math.max(max, item.uploads || 0), 1);
-  const chartHeights = analyticsSeries.map((item) =>
-    Math.round(((item.uploads || 0) / maxUploads) * 100)
-  );
-  const totalPages = Math.max(1, Math.ceil(filteredFiles.length / pageSize));
-  const pagedFiles = filteredFiles.slice((page - 1) * pageSize, page * pageSize);
-  const totalBytes = useMemo(
-    () => state.files.reduce((sum, file) => sum + (file.sizeBytes || 0), 0),
-    [state.files]
-  );
-  const totalQuota = 5 * 1024 * 1024 * 1024;
-  const usageRatio = Math.min(1, totalBytes / totalQuota);
-
-  const activitySummary = useMemo(() => {
-    const uploads = parsedActivity.filter((item) => item.type === "upload").length;
-    const downloads = parsedActivity.filter((item) => item.type === "download").length;
-    const logins = parsedActivity.filter((item) => item.type === "login").length;
-    return { uploads, downloads, logins };
-  }, [parsedActivity]);
-
-  function formatBytes(bytes = 0) {
-    if (bytes >= 1024 * 1024 * 1024) {
-      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-    }
-    if (bytes >= 1024 * 1024) {
-      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    }
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  function computeLocalAnalytics(files, activity) {
-    const now = new Date();
-    const dayMs = 24 * 60 * 60 * 1000;
-    const last7 = new Date(now.getTime() - 7 * dayMs);
-    const prev7 = new Date(now.getTime() - 14 * dayMs);
-
-    const uploadsLast7 = activity.filter(
-      (item) => item.action === "UPLOAD_FILE" && new Date(item.timestamp) >= last7
-    ).length;
-    const downloadsLast7 = activity.filter(
-      (item) => item.action === "DOWNLOAD_FILE" && new Date(item.timestamp) >= last7
-    ).length;
-
-    const series = [];
-    for (let i = 6; i >= 0; i -= 1) {
-      const date = new Date(now.getTime() - i * dayMs);
-      const dateStr = date.toISOString().slice(0, 10);
-      const uploads = activity.filter(
-        (item) => item.action === "UPLOAD_FILE" && item.timestamp?.startsWith(dateStr)
-      ).length;
-      const downloads = activity.filter(
-        (item) => item.action === "DOWNLOAD_FILE" && item.timestamp?.startsWith(dateStr)
-      ).length;
-      series.push({ date: dateStr, uploads, downloads });
-    }
-
-    const totalBytes = files.reduce((sum, file) => sum + (file.sizeBytes || 0), 0);
-    const addedLast7 = files
-      .filter((file) => new Date(file.createdAt) >= last7)
-      .reduce((sum, file) => sum + (file.sizeBytes || 0), 0);
-    const addedPrev7 = files
-      .filter((file) => new Date(file.createdAt) >= prev7 && new Date(file.createdAt) < last7)
-      .reduce((sum, file) => sum + (file.sizeBytes || 0), 0);
-
-    let trendPercent = 0;
-    if (addedPrev7 > 0) {
-      trendPercent = ((addedLast7 - addedPrev7) / addedPrev7) * 100;
-    } else if (addedLast7 > 0) {
-      trendPercent = 100;
-    }
-
-    let score = 90;
-    if (files.length > 0) score += 2;
-    if (uploadsLast7 + downloadsLast7 > 0) score += 2;
-    score = Math.min(96, score);
-
-    return {
-      rangeDays: 7,
-      uploadsLast7,
-      downloadsLast7,
-      activitySeries: series,
-      securityHealth: { score, label: "Encryption + access checks" },
-      storage: {
-        totalBytes,
-        addedLast7Bytes: addedLast7,
-        trendPercent: Number(trendPercent.toFixed(1)),
-        label: "This week"
-      },
-      filesTotal: files.length
-    };
-  }
-
-  function fileIcon(name = "") {
-    const ext = name.split(".").pop()?.toLowerCase();
-    if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)) return "IMG";
-    if (["mp4", "mov", "avi", "mkv"].includes(ext)) return "VID";
-    if (["zip", "rar", "7z", "tar"].includes(ext)) return "ZIP";
-    if (["pdf", "doc", "docx", "txt", "md"].includes(ext)) return "DOC";
-    return "FILE";
-  }
-
-  function Icon({ name }) {
-    const common = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none" };
-    const stroke = { stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
+  // --- Icons ---
+  function Icon({ name, size=24 }) {
+    const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" };
     switch (name) {
-      case "upload":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M12 16V4" />
-            <path {...stroke} d="M8 8l4-4 4 4" />
-            <path {...stroke} d="M20 16v4H4v-4" />
-          </svg>
-        );
-      case "download":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M12 4v12" />
-            <path {...stroke} d="M8 12l4 4 4-4" />
-            <path {...stroke} d="M20 20H4" />
-          </svg>
-        );
-      case "refresh":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M21 12a9 9 0 1 1-3.3-6.9" />
-            <path {...stroke} d="M21 3v6h-6" />
-          </svg>
-        );
-      case "files":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M4 7h6l2 2h8v8a2 2 0 0 1-2 2H4z" />
-            <path {...stroke} d="M4 7V5a2 2 0 0 1 2-2h4l2 2h8" />
-          </svg>
-        );
-      case "activity":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M4 14l4-4 4 4 4-6 4 6" />
-          </svg>
-        );
-      case "settings":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-            <path {...stroke} d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
-          </svg>
-        );
-      case "user":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle {...stroke} cx="12" cy="7" r="4" />
-          </svg>
-        );
-      case "team":
-        return (
-          <svg {...common}>
-            <circle {...stroke} cx="8" cy="9" r="3" />
-            <circle {...stroke} cx="16" cy="9" r="3" />
-            <path {...stroke} d="M2 20v-1a4 4 0 0 1 4-4h4" />
-            <path {...stroke} d="M22 20v-1a4 4 0 0 0-4-4h-4" />
-          </svg>
-        );
-      case "admin":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M12 2l7 4v6c0 5-3 9-7 10-4-1-7-5-7-10V6l7-4z" />
-          </svg>
-        );
-      case "export":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M12 16V4" />
-            <path {...stroke} d="M8 8l4-4 4 4" />
-            <path {...stroke} d="M4 20h16" />
-          </svg>
-        );
-      case "share":
-        return (
-          <svg {...common}>
-            <path {...stroke} d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
-            <path {...stroke} d="M12 3v12" />
-            <path {...stroke} d="M8 7l4-4 4 4" />
-          </svg>
-        );
-      default:
-        return null;
+      case "lock": return <svg {...common}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>;
+      case "unlock": return <svg {...common}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></svg>;
+      case "settings": return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V12a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
+      case "info": return <svg {...common}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>;
+      case "file": return <svg {...common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>;
+      case "plus": return <svg {...common}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>;
+      case "notes": return <svg {...common}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>;
+      case "home": return <svg {...common}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>;
+      case "terminal": return <svg {...common}><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>;
+      default: return null;
     }
   }
 
+  // --- Auth Gateway ---
+  if (!isAuthenticated) {
+    return (
+      <div className="auth-hero">
+        {showSplash && (
+          <div className="splash">
+            <img src="/brand_logo.png" width="120" alt="Logo" />
+            <h1 className="splash-title">Secura</h1>
+          </div>
+        )}
+        <div className="auth-panel">
+          <img src="/brand_logo.png" width="100" alt="Secura" style={{ alignSelf: "center" }} />
+          <h1 className="headline-hero">Secure Your Life</h1>
+          <p className="description-text">Professional-grade encryption directly in your browser.</p>
+          <div style={{ display: "flex", justifyContent: "center" }}><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => pushToast("Login Error", "error")} theme="filled_blue" shape="pill" width="320" /></div>
+          <div className="divider"><span>OR</span></div>
+          <button className="primary-btn" onClick={handleGuest}>Continue as Guest</button>
+          <a href="https://secura.app/download" target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "14px", textDecoration: "none" }}>Download Mobile App</a>
+        </div>
+      </div>
+    );
+  }
+
+  const recentFiles = state.files.slice(0, 3);
+  const totalMB = (state.files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0) / (1024 * 1024)).toFixed(1);
+
+  // --- Main Dashboard ---
   return (
     <div className="page">
-      {showSplash ? (
-        <div className="splash">
-          <div className="splash-bg" />
-          <div className="splash-content">
-            <div className="splash-logo" aria-hidden="true">
-              <svg viewBox="0 0 120 120" role="img">
-                <defs>
-                  <linearGradient id="securaGradient" x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
-                    <stop offset="100%" stopColor="#bfe2ff" stopOpacity="0.9" />
-                  </linearGradient>
-                </defs>
-                <circle cx="60" cy="60" r="52" fill="url(#securaGradient)" opacity="0.2" />
-                <path
-                  d="M60 18l30 10v24c0 22-12 40-30 50-18-10-30-28-30-50V28l30-10z"
-                  fill="rgba(255,255,255,0.9)"
-                />
-                <path
-                  d="M60 42c-8 0-14 6-14 14v8h28v-8c0-8-6-14-14-14zm0 8c4 0 6 3 6 6v4H54v-4c0-3 2-6 6-6z"
-                  fill="#0c3cff"
-                />
-              </svg>
-            </div>
-            <h1 className="splash-title">Secura</h1>
-            <p className="splash-subtitle">Secure file vault for every device.</p>
-          </div>
-        </div>
-      ) : null}
+      <div className="app-header"><h1>Secura</h1></div>
 
-      <header className="hero">
-        <div className="hero-glow" />
-        <div className="hero-inner">
-          <span className="pill">Secura</span>
-          <h1>Secure file vault for every device.</h1>
-          <p>
-            Your encrypted workspace on web and mobile. Keep files protected, searchable, and
-            always in your control.
-          </p>
-          <div className="cta-row">
-            <button className="primary" onClick={() => setActiveTab("files")}>Open files</button>
-            <button className="ghost" onClick={() => setActiveTab("overview")}>Account</button>
-          </div>
-        </div>
-      </header>
-
-      {activeTab === "overview" ? (
-        <section className="panel account panel-animate">
-          <div className="panel-header">
-            <h2>Account</h2>
-            {state.user ? <span className="status">Signed in as {state.user.email}</span> : null}
-          </div>
-          <div className="auth-card">
-            <form className="auth" onSubmit={handleAuth}>
-              <div className="tabs">
-                <button
-                  type="button"
-                  className={mode === "login" ? "tab active" : "tab"}
-                  onClick={() => setMode("login")}
-                >
-                  Login
-                </button>
-                <button
-                  type="button"
-                  className="tab"
-                  disabled
-                  aria-label="Register – Coming Soon"
-                  style={{ opacity: 0.55, cursor: "not-allowed", position: "relative" }}
-                >
-                  Register
-                  <span className="soon-badge" aria-hidden="true">Coming Soon</span>
-                </button>
-              </div>
-              <label>
-                Email
-                <input value={email} onChange={(e) => setEmail(e.target.value)} />
-              </label>
-              <label>
-                Password
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-              </label>
-              {state.error ? <div className="error">{state.error}</div> : null}
-              {state.notice ? <div className="notice">{state.notice}</div> : null}
-              <div className="button-row">
-                <button className="primary" type="submit" disabled={state.loading}>
-                  {state.loading ? "Working..." : mode === "login" ? "Sign in" : "Create account"}
-                </button>
-                {state.token ? (
-                  <button className="ghost" type="button" onClick={signOut}>Sign out</button>
-                ) : null}
-              </div>
-              <button className="ghost small" type="button" onClick={handleGuest}>
-                Continue as Guest
-              </button>
-            </form>
-          </div>
-        </section>
-      ) : null}
-
-      {activeTab === "files" ? (
-        <section
-          className={dragActive ? "panel files panel-animate drag-active" : "panel files panel-animate"}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragActive(true);
-          }}
-          onDragLeave={() => setDragActive(false)}
-          onDrop={handleDrop}
-        >
-          {dragActive ? <div className="drop-hint">Drop file to encrypt + upload</div> : null}
-          <div className="blob blob-one" />
-          <div className="blob blob-two" />
-          <div className="blob blob-three" />
-          <div className="panel-header">
-            <div>
-              <h2>Files</h2>
-              <span className="status">{state.files.length} items</span>
-            </div>
-            <div className="button-row">
-              <label className="upload-btn">
-                <span className="icon"><Icon name="upload" /></span>
-                {uploading ? "Uploading..." : "Upload file"}
-                <input
-                  type="file"
-                  onChange={handleUpload}
-                  disabled={uploading}
-                  ref={uploadInputRef}
-                />
-              </label>
-              <button className="ghost" onClick={loadFiles} disabled={uploading}>
-                <span className="icon"><Icon name="refresh" /></span>
-                Refresh
-              </button>
-            </div>
+      {activeTab === "home" && (
+        <>
+          <div className="hero-card">
+            <img src="/brand_logo.png" style={{ width: 110 }} alt="Brand" />
+            <h2 className="headline-hero">Secure Your Life</h2>
+            <p className="description-text">Move sensitive files to your private vault in seconds.</p>
+            <button className="primary-btn" onClick={() => setActiveTab("tools")}><Icon name="plus" size={20} /> Add New File</button>
+            <button className="secondary-btn" onClick={() => setActiveTab("notes")}><Icon name="notes" size={20} /> Secure Notes</button>
           </div>
 
-          <div className="usage-row">
-            <div className="usage-card">
-              <div>
-                <h3>Storage usage</h3>
-                <span className="muted">
-                  {formatBytes(totalBytes)} of {formatBytes(totalQuota)}
-                </span>
-              </div>
-              <div className="usage-bar">
-                <div className="usage-fill" style={{ width: `${Math.round(usageRatio * 100)}%` }} />
-              </div>
-              <span className="muted">Last sync {new Date().toLocaleTimeString()}</span>
-            </div>
-            <div className="usage-card recent-card">
-              <h3>Recent uploads</h3>
-              {recentFiles.length > 0 ? (
-                <div className="recent-inline">
-                  <div className="recent-inline-list">
-                    {recentFiles.map((file) => (
-                      <div key={file.fileId} className="recent-inline-item">
-                        <span>{file.originalName}</span>
-                        <span className="muted">{(file.sizeBytes / 1024).toFixed(1)} KB</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="empty">No recent uploads yet.</div>
-              )}
-            </div>
+          <div className="hero-card panel-animate" style={{ background: "linear-gradient(135deg, var(--primary) 0%, #7c7eb9 100%)", color: "white", textAlign: "left", alignItems: "flex-start" }}>
+             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                <div style={{ background: "rgba(255,255,255,0.2)", padding: "10px", borderRadius: "12px" }}><Icon name="unlock" size={24} /></div>
+                <h3 className="item-title" style={{ color: "white", margin: 0 }}>Unlock Cloud Sync</h3>
+             </div>
+             <p style={{ fontSize: "14px", opacity: 0.9, lineHeight: 1.5, margin: "12px 0" }}>
+                Take your secure vault anywhere. Sync files across devices and set up emergency inheritance with the Secura Mobile App.
+             </p>
+             <button className="secondary-btn" style={{ background: "white", color: "var(--primary)", border: "none" }} onClick={() => window.open("https://secura.app/download", "_blank")}>Get the App</button>
           </div>
 
-          <div className="overview-grid">
-            <div className="stat-card">
-              <p>Files stored</p>
-              <h3>{state.files.length}</h3>
-            </div>
-            <div className="stat-card">
-              <p>Encryption</p>
-              <h3>AES-256</h3>
-            </div>
-            <div className="stat-card">
-              <p>Status</p>
-              <h3>{state.token ? "Online" : "Offline"}</h3>
-            </div>
-          </div>
-
-          <div className="dashboard">
-            <div className="chart-card">
-              <h3>Upload activity</h3>
-              {analytics ? (
-                <>
-                  <div className="chart">
-                    {chartHeights.map((height, index) => (
-                      <div key={index} className="bar" style={{ height: `${height}%` }} />
-                    ))}
-                  </div>
-                  <span className="muted">Last {analytics.rangeDays} days</span>
-                </>
-              ) : (
-                <div className="empty">Not available.</div>
-              )}
-            </div>
-            <div className="chart-card">
-              <h3>Security health</h3>
-              {analytics ? (
-                <>
-                  <div className="ring">
-                    <div className="ring-inner">{analytics.securityHealth.score}%</div>
-                  </div>
-                  <span className="muted">{analytics.securityHealth.label}</span>
-                </>
-              ) : (
-                <div className="empty">Not available.</div>
-              )}
-            </div>
-            <div className="chart-card">
-              <h3>Storage trend</h3>
-              {analytics ? (
-                <>
-                  <div className="sparkline">
-                    <span />
-                  </div>
-                  <span className="muted">
-                    {analytics.storage.trendPercent >= 0 ? "+" : ""}
-                    {analytics.storage.trendPercent}% {analytics.storage.label}
-                  </span>
-                </>
-              ) : (
-                <div className="empty">Not available.</div>
-              )}
-            </div>
-          </div>
-
-          <div className="toolbar">
-            <input
-              className="search"
-              placeholder="Search files"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {query ? (
-              <button className="ghost small" onClick={() => setQuery("")}>
-                Clear
-              </button>
-            ) : null}
-            <div className="chip-row">
-              {[
-                { key: "recent", label: "Recent" },
-                { key: "name", label: "Name" },
-                { key: "size", label: "Size" }
-              ].map((item) => (
-                <button
-                  key={item.key}
-                  className={sortBy === item.key ? "chip active" : "chip"}
-                  onClick={() => setSortBy(item.key)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {uploading ? (
-            <div className="progress-row">
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${Math.round(uploadProgress * 100)}%` }} />
-              </div>
-              <span className="progress-label">{Math.round(uploadProgress * 100)}%</span>
-              <span className="encrypt-badge">Encrypting…</span>
-              {encryptingName ? <span className="muted">{encryptingName}</span> : null}
-              <span className="progress-stage">{uploadStage === "Idle" ? "" : uploadStage}</span>
-            </div>
-          ) : null}
-          {uploadComplete ? <div className="notice">{uploadComplete}</div> : null}
-
-          <div className="file-grid">
-            {pagedFiles.length === 0 ? (
-              <div className="empty">
-                <div className="empty-icon">UP</div>
-                <div>No files yet. Upload from web or mobile.</div>
-              </div>
+          <div className="section-meta"><span className="label-caps">Recent Imports</span><span className="usage-pill">{totalMB} MB USED</span></div>
+          <div className="list-stack">
+            {recentFiles.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px", opacity: 0.3 }}><Icon name="info" size={48} /><p style={{ fontWeight: 700, marginTop: "12px" }}>No Recent Activity</p></div>
             ) : (
-              pagedFiles.map((file) => (
-                <div
-                  key={file.fileId}
-                  className="file-card clickable"
-                  onClick={() => openDetail(file)}
-                >
-                  <div className="file-title">
-                    <span className="file-icon">{fileIcon(file.originalName)}</span>
-                    {file.originalName}
-                  </div>
-                  <button
-                    className="fav-btn"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleFavorite(file.fileId);
-                    }}
-                  >
-                    {favorites[file.fileId] ? "★" : "☆"}
-                  </button>
-                  <div className="file-meta">{(file.sizeBytes / 1024).toFixed(1)} KB</div>
-                  <div className="file-meta">
-                    v{file.version || 1} • {new Date(file.createdAt).toLocaleString()}
-                  </div>
-                  <div className="tag-row">
-                    {(fileTags[file.fileId] || []).map((tag) => (
-                      <span
-                        key={tag}
-                        className="tag-chip"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          removeTag(file.fileId, tag);
-                        }}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                  <span className="chip">Encrypted</span>
-                  <div className="action-row">
-                    <button
-                      className="ghost small"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleShare(file);
-                      }}
-                    >
-                      <span className="icon"><Icon name="share" /></span>
-                      Share
-                    </button>
-                    <button
-                      className="ghost small"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleDownloadWeb(file);
-                      }}
-                    >
-                      <span className="icon"><Icon name="download" /></span>
-                      Download
-                    </button>
-                    <button
-                      className="ghost small"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleDeleteFile(file);
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
+              recentFiles.map(file => (
+                <div key={file.fileId} className="item-card">
+                   <div className="item-icon-box"><Icon name="file" /></div>
+                   <div className="item-body">
+                      <p className="item-title">{file.originalName}</p>
+                      <p className="item-subtitle">{(file.sizeBytes / 1024).toFixed(1)} KB • {new Date(file.createdAt).toLocaleDateString()}</p>
+                   </div>
                 </div>
               ))
             )}
           </div>
-          <div className="pagination">
-            <button className="ghost small" onClick={() => setPage(Math.max(1, page - 1))}>
-              Prev
-            </button>
-            <span className="muted">Page {page} of {totalPages}</span>
-            <button className="ghost small" onClick={() => setPage(Math.min(totalPages, page + 1))}>
-              Next
-            </button>
-          </div>
-        </section>
-      ) : null}
+        </>
+      )}
 
-      {activeTab === "activity" ? (
-        <section className="panel panel-animate">
-          <div className="panel-header">
-            <div>
-              <h2>Activity</h2>
-              <span className="status">Audit trail</span>
-            </div>
-            <div className="button-row">
-              <button className="ghost small" onClick={loadActivity}>
-                <span className="icon"><Icon name="refresh" /></span>
-                Refresh
-              </button>
-              <button
-                className="ghost small"
-                onClick={() => {
-                  if (isDemo()) {
-                    const rows = readLocalActivity();
-                    function csvField(value) {
-                      const str = String(value == null ? "" : value);
-                      if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
-                        return `"${str.replace(/"/g, '""')}"`;
-                      }
-                      return str;
-                    }
-                    let csv = "id,action,timestamp,ip\n";
-                    for (const row of rows) {
-                      csv += `${csvField(row.id)},${csvField(row.action)},${csvField(row.timestamp)},\n`;
-                    }
-                    const blob = new Blob([csv], { type: "text/csv" });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = "audit.csv";
-                    document.body.appendChild(link);
-                    link.click();
-                    link.remove();
-                    URL.revokeObjectURL(url);
-                  } else {
-                    exportAuditCsv(state.token).catch((err) => pushToast(err.message, "error"));
-                  }
-                }}
-              >
-                <span className="icon"><Icon name="export" /></span>
-                Export CSV
-              </button>
-            </div>
+      {activeTab === "tools" && (
+        <>
+          <div className="section-meta"><span className="label-caps">Encryption Tool</span></div>
+          <div className={`dropzone ${isDragActive ? 'active' : ''}`} onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }} onDragLeave={() => setIsDragActive(false)} onDrop={onDrop} onClick={() => document.getElementById('encrypt-input').click()}>
+            <div className="item-icon-box" style={{ width: 80, height: 80, borderRadius: 20 }}><Icon name="lock" size={40} /></div>
+            <h2 className="headline-hero" style={{ fontSize: 24 }}>Encrypt & Secure</h2>
+            <p className="description-text">Drag and drop any file or note container.</p>
+            <input id="encrypt-input" type="file" onChange={(e) => openVault('encrypt', e.target.files[0])} style={{ display: "none" }} />
+          </div>
+          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", padding: "32px" }}>
+             <h3 className="item-title">Decrypt & Restore</h3>
+             <p className="description-text">Select your .secura container to recover files or notes.</p>
+             <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
+                <label className="secondary-btn" style={{ cursor: "pointer" }}>{decryptFile ? decryptFile.name : "Select .secura"}<input type="file" onChange={(e) => setDecryptFile(e.target.files[0])} style={{ display: "none" }} /></label>
+                <button className="primary-btn" disabled={!decryptFile || isProcessing} onClick={() => openVault('decrypt')}>{isProcessing ? "Restoring..." : "Decrypt & Download"}</button>
+             </div>
           </div>
 
-          <div className="overview-grid">
-            <div className="stat-card">
-              <p>Uploads</p>
-              <h3>{activitySummary.uploads}</h3>
+          {decryptedNotePreview && (
+            <div className="hero-card panel-animate" style={{ marginTop: "2rem", textAlign: "left", alignItems: "flex-start", border: "2px solid var(--primary)", background: "rgba(87, 89, 146, 0.05)" }}>
+               <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
+                  <h3 className="item-title">Restored Note Preview</h3>
+                  <button className="usage-pill" style={{ cursor: "pointer", border: "none" }} onClick={() => setDecryptedNotePreview(null)}>CLOSE</button>
+               </div>
+               <div style={{ background: "white", width: "100%", padding: "20px", borderRadius: "16px", marginTop: "12px", whiteSpace: "pre-wrap", border: "1px solid var(--border)", maxHeight: "300px", overflowY: "auto", fontSize: "15px", color: "var(--text-main-light)" }}>
+                  {decryptedNotePreview}
+               </div>
+               <button className="secondary-btn" style={{ marginTop: "1rem", border: "none" }} onClick={() => {
+                  const blob = new Blob([decryptedNotePreview], { type: "text/plain" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "Decrypted_Note.txt";
+                  a.click();
+                  URL.revokeObjectURL(url);
+               }}>Download as Text File</button>
             </div>
-            <div className="stat-card">
-              <p>Downloads</p>
-              <h3>{activitySummary.downloads}</h3>
-            </div>
-            <div className="stat-card">
-              <p>Logins</p>
-              <h3>{activitySummary.logins}</h3>
-            </div>
-          </div>
+          )}
 
-          <div className="toolbar">
-            <input
-              className="search"
-              placeholder="Search activity"
-              value={activityQuery}
-              onChange={(e) => setActivityQuery(e.target.value)}
-            />
-            <div className="chip-row">
-              {[
-                { key: "all", label: "All" },
-                { key: "upload", label: "Uploads" },
-                { key: "download", label: "Downloads" },
-                { key: "share", label: "Shares" },
-                { key: "login", label: "Logins" }
-              ].map((item) => (
-                <button
-                  key={item.key}
-                  className={activityFilter === item.key ? "chip active" : "chip"}
-                  onClick={() => setActivityFilter(item.key)}
-                >
-                  {item.label}
-                </button>
-              ))}
+          {cryptoLogs.length > 0 && (
+            <div className="terminal-box">
+               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", fontSize: "11px", fontWeight: 900, letterSpacing: 2 }}>
+                  <Icon name="terminal" size={14} /> SECURITY CONSOLE
+               </div>
+               {cryptoLogs.map((log, i) => (
+                 <div key={i} style={{ marginBottom: "4px", opacity: 1 - (i * 0.15) }}>{log}</div>
+               ))}
             </div>
-          </div>
+          )}
+        </>
+      )}
 
-          <div className="activity-list">
-            {filteredActivity.length === 0 ? (
-              <div className="empty">No matching activity.</div>
-            ) : (
-              filteredActivity.map((item) => (
-                <div key={item.id} className="activity-row">
-                  <div className="activity-dot" />
-                  <div>
-                    <strong>{item.label}</strong>
-                    <div className="muted">{item.time}</div>
-                  </div>
-                </div>
+      {activeTab === "notes" && (
+        <>
+          <div className="section-meta"><span className="label-caps">Secure Notes</span></div>
+          <div className="hero-card" style={{ alignItems: "stretch", textAlign: "left" }}>
+             <textarea className="note-input-area" placeholder="Write your sensitive note here..." value={noteText} onChange={e => setNoteText(e.target.value)} />
+             <button className="primary-btn" disabled={isNoteProcessing || !noteText.trim()} onClick={() => openVault('note')}>
+                {isNoteProcessing ? "Securing..." : <><Icon name="lock" size={18} /> Encrypt & Download Note</>}
+             </button>
+          </div>
+          <p className="description-text" style={{ fontSize: 13, opacity: 0.7 }}>Notes are encrypted in your browser using <strong>PBKDF2</strong>. You will need your password to decrypt.</p>
+          <div className="section-meta"><span className="label-caps">Recent Notes Activity</span></div>
+          <div className="list-stack">
+            {state.notes.length === 0 ? <div style={{ textAlign: "center", padding: "40px", opacity: 0.3 }}><Icon name="notes" size={48} /><p style={{ fontWeight: 700, marginTop: "12px" }}>No Recent Notes</p></div> : 
+              state.notes.map(n => (
+                <div key={n.id} className="item-card"><div className="item-icon-box"><Icon name="notes" /></div><div className="item-body"><p className="item-title">{n.title}</p><p className="item-subtitle">Encrypted on {new Date(n.createdAt).toLocaleDateString()}</p></div></div>
               ))
-            )}
+            }
           </div>
-        </section>
-      ) : null}
+        </>
+      )}
 
-      {activeTab === "settings" ? (
-        <section className="panel panel-animate">
-          <div className="panel-header">
-            <h2>Settings</h2>
-            <span className="status">Preferences</span>
+      {activeTab === "settings" && (
+        <>
+          <div className="section-meta"><span className="label-caps">Settings</span></div>
+          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+             <h3 className="item-title">Account</h3><p className="item-subtitle">{state.user?.email || "Guest Session"}</p>
+             <button className="primary-btn" style={{ marginTop: "12px", background: "#ef4444" }} onClick={signOut}>Sign Out</button>
           </div>
-
-          <div className="settings-grid">
-            <div className="settings-card">
-              <h3>Theme</h3>
-              <div className="chip-row">
-                {themeOptions.map((item) => (
-                  <button
-                    key={item}
-                    className={theme === item ? "chip active" : "chip"}
-                    onClick={() => setTheme(item)}
-                  >
-                    {item === "system" ? "System" : item === "dark" ? "Dark" : "Light"}
-                  </button>
+          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+             <h3 className="item-title">Appearance</h3>
+             <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
+                {themeOptions.map(opt => (
+                  <button key={opt} className={`usage-pill ${theme === opt ? 'active' : ''}`} style={{ cursor: "pointer", border: theme === opt ? "2px solid var(--primary)" : "none", padding: "8px 16px" }} onClick={() => setTheme(opt)}>{opt.toUpperCase()}</button>
                 ))}
-              </div>
-              <span className="muted">System matches your device settings.</span>
-            </div>
-
-            <div className="settings-card">
-              <h3>Security</h3>
-              <div className="toggle-row">
-                <div>
-                  <strong>Auto-lock</strong>
-                  <div className="muted">Lock after 2 minutes of inactivity.</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.autoLock}
-                  onChange={() => setSettings((s) => ({ ...s, autoLock: !s.autoLock }))}
-                />
-              </div>
-              <div className="toggle-row">
-                <div>
-                  <strong>Biometric unlock</strong>
-                  <div className="muted">Available in the Secura mobile app (fingerprint / Face ID).</div>
-                </div>
-                <span className="soon-badge" aria-label="Coming Soon" role="status">Coming Soon</span>
-              </div>
-            </div>
-
-            <div className="settings-card">
-              <h3>Privacy</h3>
-              <div className="toggle-row">
-                <div>
-                  <strong>Hide app previews</strong>
-                  <div className="muted">Blur Secura in the app switcher.</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.privacyShield}
-                  onChange={() => setSettings((s) => ({ ...s, privacyShield: !s.privacyShield }))}
-                />
-              </div>
-              <div className="toggle-row">
-                <div>
-                  <strong>Clipboard timeout</strong>
-                  <div className="muted">Clear copied links after 60 seconds.</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.clipboardTimeout}
-                  onChange={() => setSettings((s) => ({ ...s, clipboardTimeout: !s.clipboardTimeout }))}
-                />
-              </div>
-            </div>
-
-            <div className="settings-card">
-              <h3>Experience</h3>
-              <div className="toggle-row">
-                <div>
-                  <strong>Haptic feedback</strong>
-                  <div className="muted">Subtle taps for secure actions.</div>
-                </div>
-                <span className="soon-badge" aria-label="Coming Soon" role="status">Coming Soon</span>
-              </div>
-              <div className="toggle-row">
-                <div>
-                  <strong>Reduce motion</strong>
-                  <div className="muted">Minimize animated transitions.</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.reduceMotion}
-                  onChange={() => setSettings((s) => ({ ...s, reduceMotion: !s.reduceMotion }))}
-                />
-              </div>
-            </div>
-
-            <div className="settings-card">
-              <h3>Connections</h3>
-              <p className="muted">
-                Cloud backup integrations are on the product roadmap and will be added in a future release.
-              </p>
-              <div className="connection-row">
-                <span className="conn-dot google" />
-                <span>Google Drive</span>
-                <button className="ghost small" disabled aria-label="Connect Google Drive – Coming Soon" style={{ opacity: 0.55, cursor: "not-allowed" }}>
-                  Connect <span className="soon-badge" aria-hidden="true">Coming Soon</span>
-                </button>
-              </div>
-              <div className="connection-row">
-                <span className="conn-dot icloud" />
-                <span>iCloud</span>
-                <button className="ghost small" disabled aria-label="Connect iCloud – Coming Soon" style={{ opacity: 0.55, cursor: "not-allowed" }}>
-                  Connect <span className="soon-badge" aria-hidden="true">Coming Soon</span>
-                </button>
-              </div>
-              <div className="connection-row">
-                <span className="conn-dot onedrive" />
-                <span>OneDrive</span>
-                <button className="ghost small" disabled aria-label="Connect OneDrive – Coming Soon" style={{ opacity: 0.55, cursor: "not-allowed" }}>
-                  Connect <span className="soon-badge" aria-hidden="true">Coming Soon</span>
-                </button>
-              </div>
-            </div>
-
-            {state.token && !isDemo() ? (
-              <div className="settings-card">
-                <h3>Change Password</h3>
-                <form onSubmit={handleChangePassword}>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>
-                    Current password
-                    <input
-                      type="password"
-                      value={pwCurrent}
-                      onChange={(e) => setPwCurrent(e.target.value)}
-                      autoComplete="current-password"
-                    />
-                  </label>
-                  <label style={{ display: "block", marginBottom: "0.75rem" }}>
-                    New password
-                    <input
-                      type="password"
-                      value={pwNew}
-                      onChange={(e) => setPwNew(e.target.value)}
-                      autoComplete="new-password"
-                    />
-                  </label>
-                  {pwMsg.text ? (
-                    <div className={pwMsg.type === "error" ? "error" : "notice"} style={{ marginBottom: "0.5rem" }}>
-                      {pwMsg.text}
-                    </div>
-                  ) : null}
-                  <button className="primary" type="submit" disabled={pwLoading}>
-                    {pwLoading ? "Updating…" : "Update password"}
-                  </button>
-                </form>
-              </div>
-            ) : null}
+             </div>
           </div>
-        </section>
-      ) : null}
+          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+             <h3 className="item-title">Plausible Deniability (Decoy)</h3>
+             <p className="description-text">Set a secondary password. If entered during decryption, Secura will load a fake environment to protect your real data.</p>
+             <input 
+                type="password" 
+                className="note-input-area" 
+                style={{ height: "48px", minHeight: "48px", marginBottom: "12px" }} 
+                placeholder="Set Decoy Password" 
+                value={state.decoyPassword}
+                onChange={e => {
+                  const val = e.target.value;
+                  setState(s => ({ ...s, decoyPassword: val }));
+                  localStorage.setItem(DECOY_KEY, val);
+                }}
+             />
+             {state.decoyPassword && <p style={{ fontSize: "11px", color: "#10b981", fontWeight: 800 }}>Decoy Protocol Active</p>}
+          </div>
 
-      {activeTab === "about" ? (
-        <section className="panel panel-animate">
-          <div className="panel-header">
-            <h2>About Secura</h2>
-            <span className="status">Team</span>
+          <div className="section-meta"><span className="label-caps">System Capabilities Map</span></div>
+          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", gap: "20px" }}>
+             <div style={{ width: "100%" }}>
+                <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 900 }}>Current (Secura Web)</h4>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                   <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>LOCAL SANDBOX</span>
+                   <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>PBKDF2-AES256</span>
+                   <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>ZERO KNOWLEDGE</span>
+                   <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>DECOY PROTOCOL</span>
+                </div>
+             </div>
+             <div style={{ width: "100%", opacity: 0.6 }}>
+                <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 900 }}>Coming Soon (Secura Mobile)</h4>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                   <span className="usage-pill">CLOUD DRIVE SYNC</span>
+                   <span className="usage-pill">INHERITANCE PROTOCOL</span>
+                   <span className="usage-pill">CROSS-DEVICE ACCESS</span>
+                   <span className="usage-pill">BIOMETRIC AUTH</span>
+                </div>
+             </div>
+             <button className="primary-btn" style={{ marginTop: "10px" }} onClick={() => window.open("https://secura.app/download", "_blank")}>Explore Pro Features</button>
           </div>
-          <p className="lead">
-            We build secure, elegant storage for everyone. This MVP highlights encryption,
-            role-aware access, and a calm experience across devices.
-          </p>
-          <div className="about-actions">
-            <a className="ghost small" href="https://github.com/mini-page" target="_blank" rel="noreferrer">
-              <span className="icon"><Icon name="share" /></span>
-              GitHub
-            </a>
+          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+             <h3 className="item-title">Storage</h3>
+             <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444" }} onClick={() => { if(window.confirm("Clear all local activity logs? Files/Keys in downloads will remain.")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("Local logs cleared", "info"); } }}>Clear Activity Logs</button>
           </div>
+        </>
+      )}
+
+      {activeTab === "about" && (
+        <>
+          <div className="section-meta"><span className="label-caps">Our Team</span></div>
           <div className="team-grid">
-            {team.map((member) => (
-              <div key={member.name} className={`team-card ${member.accent}`}>
-                <div className="team-avatar">{member.name.charAt(0)}</div>
-                <div className="team-body">
-                  <h3>{member.name}</h3>
-                  <span className="team-role">{member.role}</span>
-                  <p className="muted">{member.focus}</p>
-                </div>
+            {team.map(m => (
+              <div key={m.name} className="team-card">
+                 <div className="team-avatar">{m.name[0]}</div>
+                 <p className="team-name">{m.name}</p>
+                 <span className="team-role">{m.role}</span>
+                 <p className="team-focus">{m.focus}</p>
               </div>
             ))}
           </div>
-        </section>
-      ) : null}
+          <div className="terminal-box" style={{ background: "rgba(87, 89, 146, 0.05)", color: "var(--text-main-light)", border: "1px solid var(--primary)" }}>
+             <h3 style={{ fontSize: 16, fontWeight: 900 }}>🛡️ Technical Audit (Web)</h3>
+             <p style={{ fontSize: 14, lineHeight: 1.6, opacity: 0.8 }}>This project implements <strong>Zero-Knowledge Encryption</strong> via the W3C Web Crypto API. Keys are derived from your password using <strong>PBKDF2</strong> with 100,000 iterations. Data is secured using <strong>AES-256-GCM</strong>. Your raw passwords and keys never leave your browser memory, ensuring a private, local-first sandbox experience.</p>
+          </div>
+        </>
+      )}
 
-      {activeTab === "admin" ? (
-        <section className="panel admin panel-animate">
-          <div className="panel-header">
-            <h2>Admin Console</h2>
-            <div className="button-row">
-              <button className="ghost" onClick={loadAdmin}>Refresh</button>
-              <button
-                className="ghost small"
-                onClick={() => adminExportCsv(state.token).catch((err) => pushToast(err.message, "error"))}
-              >
-                <span className="icon"><Icon name="export" /></span>
-                Export All Logs
-              </button>
-            </div>
-          </div>
-          {state.error ? <div className="error">{state.error}</div> : null}
-          {adminSummary ? (
-            <div className="overview-grid">
-              <div className="stat-card">
-                <p>Users</p>
-                <h3>{adminSummary.users}</h3>
-              </div>
-              <div className="stat-card">
-                <p>Files</p>
-                <h3>{adminSummary.files}</h3>
-              </div>
-              <div className="stat-card">
-                <p>Uploads</p>
-                <h3>{adminSummary.uploads}</h3>
-              </div>
-              <div className="stat-card">
-                <p>Downloads</p>
-                <h3>{adminSummary.downloads}</h3>
-              </div>
-            </div>
-          ) : null}
-          <div className="admin-grid">
-            <div className="admin-card">
-              <h3>Users</h3>
-              {state.adminUsers.length === 0 ? (
-                <div className="empty">No users found.</div>
-              ) : (
-                state.adminUsers.map((user) => (
-                  <div key={user.id} className="admin-row">
-                    <div>
-                      <strong>{user.email}</strong>
-                      <div className="muted">Role: {user.role}</div>
-                    </div>
-                    <div className="button-row">
-                      <span className="chip">{user.role}</span>
-                      {user.email !== state.user?.email ? (
-                        <button
-                          className="ghost small"
-                          onClick={() => handleAdminToggleUser(user.id)}
-                        >
-                          {user.isActive === false ? "Enable" : "Disable"}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="admin-card">
-              <h3>Audit Logs</h3>
-              {state.adminLogs.length === 0 ? (
-                <div className="empty">No logs found.</div>
-              ) : (
-                state.adminLogs.slice(0, 12).map((log) => (
-                  <div key={log.id} className="admin-row">
-                    <div>
-                      <strong>{log.action}</strong>
-                      <div className="muted">{new Date(log.timestamp).toLocaleString()}</div>
-                    </div>
-                    <span className="chip">{log.ip}</span>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="admin-card">
-              <h3>Active Share Links</h3>
-              {adminShares.length === 0 ? (
-                <div className="empty">No share links.</div>
-              ) : (
-                adminShares.slice(0, 8).map((share) => (
-                  <div key={share.token} className="admin-row">
-                    <div>
-                      <strong>{share.fileName}</strong>
-                      <div className="muted">
-                        Expires:{" "}
-                        {share.expiresAt ? new Date(share.expiresAt).toLocaleString() : "No expiry"}
-                      </div>
-                    </div>
-                    <div className="button-row">
-                      <span className="chip">{share.owner}</span>
-                      <button
-                        className="ghost small"
-                        onClick={() => handleAdminRevokeShare(share.token)}
-                      >
-                        Revoke
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </section>
-      ) : null}
+      <SecurityVaultModal />
+      <div className="toast-stack">{toasts.map((t) => <div key={t.id} className={`toast`}>{t.message}</div>)}</div>
 
-      {detailOpen && activeFile ? (
-        <div className="modal-backdrop" onClick={() => { setDetailOpen(false); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <h3>File details</h3>
-            <div className="modal-row">
-              <span className="muted">Name</span>
-              <strong>{activeFile.originalName}</strong>
-            </div>
-            <div className="modal-row">
-              <span className="muted">Size</span>
-              <strong>{(activeFile.sizeBytes / 1024).toFixed(1)} KB</strong>
-            </div>
-            <div className="modal-row">
-              <span className="muted">Version</span>
-              <strong>{activeFile.version || 1}</strong>
-            </div>
-            <div className="modal-row">
-              <span className="muted">Created</span>
-              <strong>{new Date(activeFile.createdAt).toLocaleString()}</strong>
-            </div>
-            <div className="modal-row">
-              <span className="muted">Encryption</span>
-              <strong>AES-256-GCM</strong>
-            </div>
-            {activeFile.checksum ? (
-              <div className="modal-row">
-                <span className="muted">Integrity (SHA-256)</span>
-                <strong style={{ fontFamily: "monospace", fontSize: "0.8em" }}>
-                  {activeFile.checksum.slice(0, 16)}…
-                </strong>
-              </div>
-            ) : null}
-            {fileIcon(activeFile.originalName) === "IMG" && previewUrl ? (
-              <div className="modal-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: "0.5rem" }}>
-                <span className="muted">Preview</span>
-                <img
-                  src={previewUrl}
-                  alt={activeFile.originalName}
-                  style={{ maxWidth: "100%", maxHeight: "220px", borderRadius: "6px", objectFit: "contain" }}
-                />
-              </div>
-            ) : null}
-            <div className="modal-row">
-              <span className="muted">Tags</span>
-              <div className="tag-row">
-                {(fileTags[activeFile.fileId] || []).map((tag) => (
-                  <span key={tag} className="tag-chip" onClick={() => removeTag(activeFile.fileId, tag)}>
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="modal-row">
-              <span className="muted">Add tag</span>
-              <div className="tag-input">
-                <input
-                  value={tagInput}
-                  onChange={(event) => setTagInput(event.target.value)}
-                  placeholder="e.g. finance"
-                />
-                <button
-                  className="ghost small"
-                  onClick={() => {
-                    addTag(activeFile.fileId, tagInput);
-                    setTagInput("");
-                  }}
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-            <div className="modal-row">
-              <span className="muted">Shares</span>
-              <div className="share-list">
-                {shareLoading ? (
-                  <span className="muted">Loading…</span>
-                ) : shareLinks.length === 0 ? (
-                  <span className="muted">No active links</span>
-                ) : (
-                  shareLinks.map((share) => (
-                    <div key={share.token} className="share-row">
-                      <span className="muted">
-                {share.expiresAt ? `Expires ${new Date(share.expiresAt).toLocaleString()}` : "No expiry"}
-              </span>
-                      <div className="button-row">
-                        <button
-                          className="ghost small"
-                          onClick={() => {
-                            const base = API_BASE.startsWith("http")
-                              ? API_BASE
-                              : `${window.location.origin}${API_BASE}`;
-                            const link = `${base}/files/share/${share.token}`;
-                            if (navigator.clipboard?.writeText) {
-                              navigator.clipboard.writeText(link).then(() => {
-                                pushToast("Link copied.", "success");
-                                if (settings.clipboardTimeout) {
-                                  setTimeout(() => navigator.clipboard.writeText("").catch(() => {}), 60 * 1000);
-                                }
-                              });
-                            } else {
-                              window.prompt("Copy share link:", link);
-                            }
-                          }}
-                        >
-                          Copy
-                        </button>
-                        <button className="ghost small" onClick={() => handleRevokeShare(share.token)}>
-                          Revoke
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="button-row">
-              <button
-                className="primary"
-                onClick={() => handleDownloadWeb(activeFile)}
-              >
-                <span className="icon"><Icon name="download" /></span>
-                Download
-              </button>
-              <button className="ghost" onClick={() => handleShare(activeFile)}>
-                <span className="icon"><Icon name="share" /></span>
-                Share
-              </button>
-              <button className="ghost" onClick={() => handleDeleteFile(activeFile)}>
-                Delete
-              </button>
-              <button className="ghost" onClick={() => { setDetailOpen(false); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <div className="fab-container"><button className="fab" onClick={() => setActiveTab("tools")}><Icon name="plus" size={32} /></button></div>
 
-      <div className="toast-stack">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast ${toast.type}`} >
-            {toast.message}
-          </div>
-        ))}
-      </div>
-
-      <button className={fabOpen ? "fab open" : "fab"} onClick={() => setFabOpen(true)}>
-        ☰
-      </button>
-      {fabOpen ? (
-        <div className="fab-backdrop" onClick={() => setFabOpen(false)}>
-          <div className="fab-menu" onClick={(event) => event.stopPropagation()}>
-            <p className="fab-title">Quick Actions</p>
-            <button
-              className="fab-item"
-              onClick={() => {
-                setFabOpen(false);
-                setActiveTab("files");
-                setTimeout(() => uploadInputRef.current?.click(), 80);
-              }}
-            >
-              <span className="icon"><Icon name="upload" /></span>
-              Upload file
-            </button>
-            <p className="fab-section">Navigate</p>
-            {[
-              { key: "files", label: "Files", icon: "files" },
-              { key: "activity", label: "Activity", icon: "activity" },
-              { key: "settings", label: "Settings", icon: "settings" },
-              { key: "about", label: "About Us", icon: "team" },
-              { key: "overview", label: "Account", icon: "user" },
-              isAdmin ? { key: "admin", label: "Admin", icon: "admin" } : null
-            ]
-              .filter(Boolean)
-              .map((tab) => (
-                <button
-                  key={tab.key}
-                  className={activeTab === tab.key ? "fab-item active" : "fab-item"}
-                  onClick={() => {
-                    setActiveTab(tab.key);
-                    setFabOpen(false);
-                  }}
-                >
-                  <span className="icon"><Icon name={tab.icon} /></span>{tab.label}
-                </button>
-              ))}
-          </div>
-        </div>
-      ) : null}
+      <nav className="bottom-nav">
+        <button className={`nav-item ${activeTab === "home" ? 'active' : ''}`} onClick={() => setActiveTab("home")}><Icon name="home" size={24} /><span className="nav-label">Home</span></button>
+        <button className={`nav-item ${activeTab === "notes" ? 'active' : ''}`} onClick={() => setActiveTab("notes")}><Icon name="notes" size={24} /><span className="nav-label">Notes</span></button>
+        <button className={`nav-item ${activeTab === "settings" ? 'active' : ''}`} onClick={() => setActiveTab("settings")}><Icon name="settings" size={24} /><span className="nav-label">Settings</span></button>
+        <button className={`nav-item ${activeTab === "about" ? 'active' : ''}`} onClick={() => setActiveTab("about")}><Icon name="info" size={24} /><span className="nav-label">About</span></button>
+      </nav>
     </div>
   );
 }

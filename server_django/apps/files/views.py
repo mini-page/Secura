@@ -52,11 +52,11 @@ def file_detail(request, file_id):
     if request.method == 'DELETE':
         storage_path = record.storage_path
         record.delete()
-        try:
-            if os.path.exists(storage_path):
+        if storage_path and os.path.exists(storage_path):
+            try:
                 os.remove(storage_path)
-        except OSError:
-            pass
+            except OSError:
+                pass
         log_action(request.user, 'DELETE_FILE', request.META.get('REMOTE_ADDR'))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -98,6 +98,33 @@ def upload_file(request):
         checksum=checksum
     )
     log_action(request.user, 'UPLOAD_FILE', request.META.get('REMOTE_ADDR'))
+    return Response(StoredFileSerializer(record).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_metadata(request):
+    """
+    Registry for local-only files (Web Client Sandbox).
+    Syncs the activity log and metadata without the file payload.
+    """
+    name = request.data.get('original_name')
+    size = request.data.get('size_bytes', 0)
+    checksum = request.data.get('checksum', '')
+    
+    if not name:
+        return Response({'detail': 'original_name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    record = StoredFile.objects.create(
+        owner=request.user,
+        original_name=name,
+        size_bytes=size,
+        checksum=checksum,
+        status='LOCAL_ONLY',
+        storage_path=None
+    )
+    
+    log_action(request.user, 'LOCAL_ENCRYPT', request.META.get('REMOTE_ADDR'))
     return Response(StoredFileSerializer(record).data, status=status.HTTP_201_CREATED)
 
 
