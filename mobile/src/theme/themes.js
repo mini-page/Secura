@@ -1,0 +1,41 @@
+export const lightColors = {
+  primary: "#1E6FFF",
+  primary700: "#1453CC",
+  primary50: "#E8F0FF",
+  surface: "#FFFFFF",
+  surfaceVariant: "#F5F7FB",
+  background: "#F3F5F9",
+  textPrimary: "#0F172A",
+  textSecondary: "#3E4B62",
+  textTertiary: "#94A3B8",
+  success: "#16A34A",
+  warning: "#F59E0B",
+  error: "#DC2626",
+  outline: "#E2E8F0",
+  focus: "#93C5FD",
+  badgeText: "#0F5132",
+  badgeBg: "#D1E7DD",
+  iconBadge: "#E8F0FF",
+  backdrop: "rgba(15, 23, 42, 0.4)"
+};
+
+export const darkColors = {
+  primary: "#7AA7FF",
+  primary700: "#4C7BFF",
+  primary50: "#1A2644",
+  surface: "#0F172A",
+  surfaceVariant: "#131E35",
+  background: "#0B1222",
+  textPrimary: "#E2E8F0",
+  textSecondary: "#C2CDDD",
+  textTertiary: "#7E8CA5",
+  success: "#4ADE80",
+  warning: "#FBBF24",
+  error: "#F87171",
+  outline: "#1F2A44",
+  focus: "#3B82F6",
+  badgeText: "#B7F4D1",
+  badgeBg: "#123024",
+  iconBadge: "#182447",
+  backdrop: "rgba(2, 6, 23, 0.6)"
+};
