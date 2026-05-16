@@ -1,51 +1,32 @@
-# Secura MVP Demo Script
+# Secura (SFSS) Official Demo Script 🎬
 
-## Goal
-Show a secure file storage workflow with encryption, RBAC, and audit logging.
+This script guides you through a professional demonstration of the Secura ecosystem, highlighting the "Work Wow" factors.
 
-## Setup
-- Backend running on `http://localhost:4000`
-- Web app running on `http://localhost:5173`
-- Seeded accounts:
-  - Admin: `admin@secura.local` / `<ADMIN_PASSWORD>`
-  - User: `user@secura.local` / `<USER_PASSWORD>`
+## 🏗️ Part 1: The Gateway (Auth & Brand)
+1.  **Splash Screen:** Open the web app. Highlight the brand splash screen that establishes Secura as a professional security product.
+2.  **Login:** Sign in using **Google OAuth**. Explain that while identity is cloud-managed, file security is local.
+3.  **Guest Mode:** Mention that Secura supports local-only guest sessions for immediate privacy.
 
-## Demo Flow (5–7 minutes)
+## 🔐 Part 2: The Security Vault (Local Sandbox)
+1.  **Encryption:** Drag a sensitive PDF into the "Encrypt & Secure" dropzone.
+2.  **The Vault Modal:** Show the **Security Vault** modal. Type a weak password (red bar), then a strong one (green bar). 
+3.  **Technical Feedback:** Point to the **Security Console** (Terminal). Show the PBKDF2 iterations and AES block processing logs.
+4.  **Zero-Knowledge:** Explain that the password you just typed **never left the browser memory**.
+5.  **Metadata Sync:** Open the Django Admin or Cloud Dashboard. Show that the backend recorded the file metadata and checksum, but has **zero access** to the file itself.
 
-1. **Intro (30s)**
-   - “Secura is a secure file vault. Files are encrypted before storage and access is logged.”
-   - Show splash and hero screen.
+## 🎭 Part 3: Plausible Deniability (The Decoy)
+1.  **Setup:** Go to Settings. Set a **Decoy Password** (e.g., "12345").
+2.  **Duress Demo:** Go back to the Decrypt tool. Select the `.secura` file.
+3.  **Fake Restore:** Type the decoy password "12345". 
+4.  **Result:** Show the system simulating processing and then failing with a realistic "Integrity Error." 
+5.  **Strategic Rationale:** Explain that this protects users who are forced to unlock their vault.
 
-2. **Login (30s)**
-   - Open Account tab.
-   - Login as **User**.
+## 📊 Part 4: Ecosystem Roadmap
+1.  **The Mirror Concept:** Point to the "Recent Imports" section. Explain that this is a mirror of their local vault.
+2.  **Conversion:** Show the **System Capabilities Map** in Settings.
+3.  **The Pitch:** "The Web app is your secure sandbox. If you want these files synced to Google Drive or protected by FaceID, download the **Secura Mobile App**."
 
-3. **Upload + Encryption (1m)**
-   - Upload a file.
-   - Point to encryption progress bar and “Encrypting” label.
-   - Confirm file appears in the list and recent section.
-
-4. **Download + Decryption (45s)**
-   - Click download.
-   - Explain decryption happens on access, never stored decrypted.
-
-5. **Search + Filter (30s)**
-   - Search for a file.
-   - Sort by size or name.
-
-6. **Audit Trail (45s)**
-   - Go to Activity tab.
-   - Show upload/download entries with timestamps.
-
-7. **Admin Oversight (1m)**
-   - Logout and login as **Admin**.
-   - Open Admin tab: show users + audit logs.
-   - Explain RBAC: admin can see system logs; user cannot.
-
-8. **Wrap (30s)**
-   - “Core goals achieved: encryption, RBAC, audit, secure access.”
-   - Mention future work: versioning, cloud storage, 2FA.
-
-## Optional Notes
-- If analytics panel shows data, point out it’s computed from real activity.
-- If demo data is empty, run seed script again before presenting.
+## 🎓 Summary for Examiners
+- **Innovation:** Shifted from server-side storage to a Zero-Knowledge architectural model.
+- **Functionality:** Real working PBKDF2, Decoy protocols, and metadata mirroring.
+- **Usability:** High-polish UI with professional security feedback loops.

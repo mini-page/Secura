@@ -1,71 +1,61 @@
-# Secura (SFSS)
+# Secura (SFSS) 🛡️
 
-Secure File Storage System (SFSS) — a secure, role-based file vault with AES encryption, audit logs, and a clean web UI.
+**Secure File Storage System (SFSS)** — A professional-grade, Zero-Knowledge file vault featuring password-derived AES-256-GCM encryption, plausible deniability protocols, and a cloud-synced metadata registry.
 
 ![Secura dashboard overview](docs/assets/dashborad%20overview.png)
 
-## Highlights
-- AES-256 encryption at rest (encrypt on upload, decrypt on download)
-- Role-based access control (admin vs user)
-- Audit logging for uploads, downloads, and logins
-- Powerful file search + sorting (name, size, recent)
-- Theme preferences (light/dark/system)
-- Drive connections panel (Google Drive, iCloud, OneDrive placeholders)
-- Web UI aligned with the mobile demo experience
+## ✨ Project Evolution: The "Work Wow" Factor
+Secura has evolved from a standard file uploader into a high-security **Privacy Sandbox**. By implementing Zero-Knowledge principles, we ensure that user data is encrypted locally and sensitive keys never leave the browser.
 
-![Secura login](docs/assets/login.png)
+### Core Features
+- **Zero-Knowledge Architecture:** Encryption happens entirely in the browser using the W3C Web Crypto API.
+- **PBKDF2 Key Derivation:** No more clunky key files. Keys are derived from your personal password using 100,000 iterations of SHA-256 and unique 16-byte salts.
+- **Plausible Deniability (Decoy Vault):** Users can set a secondary "Decoy" password to load a fake environment, protecting real data under duress.
+- **Metadata Registry Sync:** Local security actions (encryption/decryption) are mirrored to a Django-powered cloud ledger for persistent activity history.
+- **Mobile Funnel UI:** A strategic web-to-mobile bridge that previews "Pro" features like Cloud Drive Sync, Inheritance, and Biometric Auth.
 
-## Project Structure
+## 🏗️ Project Structure
 ```
-server_django/   Django backend (API, encryption, audit)
-web/             Vite + React web app
-src/             React Native mobile app (demo)
+server_django/   Django Backend (Metadata Registry, Audit Log, Identity)
+web/             React Web Client (Zero-Knowledge Local Sandbox)
+src/             React Native Mobile App (The "Sync & Inheritance" Pro Demo)
 ```
 
-![Secura dashboard](docs/assets/dashborad.png)
+## 🚀 Quick Start (Local Development)
 
-## Quick Start (Local)
-
-### Backend (Django + MySQL)
+### 1. Backend Registry (Django + MySQL)
 ```bash
 cd server_django
-venv\Scripts\python manage.py migrate
-venv\Scripts\python manage.py runserver 0.0.0.0:4000
+venv\Scripts\activate
+python manage.py migrate
+python manage.py runserver 0.0.0.0:4000
 ```
+*The backend now acts as a secure identity provider and activity ledger.*
 
-Seed demo accounts + sample files:
-```bash
-$env:PYTHONPATH="."
-venv\Scripts\python scripts\seed.py
-```
-
-### Web (Vite + React)
+### 2. Web Sandbox (Vite + React)
 ```bash
 cd web
 npm install
 npm run dev
 ```
+*The Web Client performs all cryptographic operations locally for maximum privacy.*
 
-The web app uses `/api` and proxies to the backend during development.
+## 🛡️ Security & Cryptography
+Secura follows industry-standard security protocols:
+- **Cipher:** AES-256-GCM (Galois/Counter Mode) for authenticated encryption.
+- **KDF:** PBKDF2 with 100k iterations to mitigate brute-force attacks.
+- **Entropy:** Real-time password strength indicator in the vault interface.
 
-![Secura files + navigation](docs/assets/navigation%20menu.png)
+For a deep dive into our security model, see [SECURITY.md](SECURITY.md).
 
-## Environment
-Backend config lives in `server_django/.env`. Important keys:
-- `DJANGO_SECRET_KEY`
-- `DB_*` MySQL credentials
-- `AES_KEY_BASE64` (keep stable to decrypt old files)
-- `STORAGE_DIR`
+## 📊 Roadmap & Ecosystem
+The web app serves as the high-security "Lite" entry point, while the **Secura Mobile App** unlocks the full ecosystem:
+- [x] Local Sandbox (Web)
+- [x] Metadata Cloud Sync
+- [x] Plausible Deniability
+- [ ] Cloud Drive Integration (Mobile Pro)
+- [ ] Emergency Inheritance Protocol (Mobile Pro)
+- [ ] Biometric Secure Enclave (Mobile Pro)
 
-![Secura settings](docs/assets/settings.png)
-
-## Deployment (Vercel + Railway)
-See `DEPLOYMENT_CHECKLIST.md`.
-
-## Demo Script
-See `DEMO_SCRIPT.md`.
-
-![Secura activity](docs/assets/activity.png)
-
-## License
+## 📄 License
 MIT. See `LICENSE`.
