@@ -57,6 +57,8 @@ export default function App() {
 
   const isAuthenticated = !!state.token;
 
+  const APK_LINK = "https://github.com/mini-page/Secura/releases/download/v2.0.0/Secura_appV2.apk";
+
   // --- Handlers ---
   
   function addCryptoLog(msg) {
@@ -325,6 +327,7 @@ export default function App() {
 
   function signOut() {
     setState(initialState);
+    setIsEntered(false);
     localStorage.removeItem(STORAGE_KEY);
     pushToast("Signed out", "info");
   }
@@ -424,7 +427,7 @@ export default function App() {
   }
 
   // --- Auth Gateway ---
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !isEntered) {
     return (
       <div className="auth-hero">
         {showSplash && (
@@ -444,11 +447,13 @@ export default function App() {
                 <p style={{ fontWeight: 800 }}>Verifying Identity...</p>
              </div>
           ) : state.token ? (
-             <div className="hero-card panel-animate" style={{ padding: '32px', textAlign: 'center', border: '2px solid var(--primary)' }}>
-                <div className="item-icon-box" style={{ margin: '0 auto 16px', background: 'var(--primary)', color: 'white' }}><Icon name="unlock" /></div>
-                <h3 className="item-title">Access Granted</h3>
-                <p className="description-text" style={{ marginBottom: '20px' }}>Welcome back, {state.user?.name || 'User'}</p>
-                <button className="primary-btn" style={{ width: '100%' }} onClick={() => setActiveTab('home')}>Continue to Vault</button>
+             <div className="hero-card panel-animate" style={{ padding: '32px', textAlign: 'center', border: '2px solid var(--primary)', background: 'rgba(87, 89, 146, 0.05)' }}>
+                <div className="item-icon-box" style={{ margin: '0 auto 16px', background: 'var(--primary)', color: 'white' }}><Icon name="unlock" size={32} /></div>
+                <h3 className="item-title" style={{ fontSize: '24px' }}>Access Granted</h3>
+                <p className="description-text" style={{ marginBottom: '24px', fontSize: '15px' }}>Identity verified. Your secure environment is ready.</p>
+                <button className="primary-btn" style={{ width: '100%', padding: '20px' }} onClick={() => setIsEntered(true)}>
+                    Enter Secure Vault
+                </button>
              </div>
           ) : (
              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
@@ -456,7 +461,7 @@ export default function App() {
                <div className="divider"><span>OR</span></div>
                <button className="primary-btn" style={{ background: 'var(--primary)', color: 'white', fontWeight: 800 }} onClick={handleGuest}>Continue as Guest</button>
                <div style={{ textAlign: 'center', marginTop: '12px' }}>
-                <a href="https://github.com/mini-page/Secura/releases/tag/v2.0.0" target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "13px", textDecoration: "none" }}>Get Mobile App for Cloud Sync</a>
+                <a href={APK_LINK} target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "13px", textDecoration: "none" }}>Get Mobile App for Cloud Sync</a>
                </div>
              </div>
           )}
@@ -493,7 +498,7 @@ export default function App() {
              <p style={{ fontSize: "14px", opacity: 0.9, lineHeight: 1.5, margin: "12px 0" }}>
                 Take your secure vault anywhere. Sync files across devices and set up emergency inheritance with the Secura Mobile App.
              </p>
-             <button className="secondary-btn" style={{ background: "white", color: "var(--primary)", border: "none" }} onClick={() => window.open("https://secura.app/download", "_blank")}>Get the App</button>
+             <button className="secondary-btn" style={{ background: "white", color: "var(--primary)", border: "none" }} onClick={() => window.open(APK_LINK, "_blank")}>Get the App</button>
           </div>
 
           <div className="section-meta">
@@ -670,7 +675,7 @@ export default function App() {
                    <span className="usage-pill">BIOMETRIC AUTH</span>
                 </div>
              </div>
-             <button className="primary-btn" style={{ marginTop: "10px" }} onClick={() => window.open("https://secura.app/download", "_blank")}>Explore Pro Features</button>
+             <button className="primary-btn" style={{ marginTop: "10px" }} onClick={() => window.open(APK_LINK, "_blank")}>Explore Pro Features</button>
           </div>
           <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
              <h3 className="item-title">Storage</h3>
