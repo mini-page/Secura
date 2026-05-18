@@ -86,11 +86,101 @@ body {
   background: rgba(87, 89, 146, 0.1);
 }
 
-.nav-label {
-  font-size: 10px;
+.nav-item.active .nav-label {
+  color: var(--primary);
+}
+
+/* Vault Toggle */
+.vault-toggle {
+  flex: 1;
+  padding: 10px 24px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted-light);
   font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+:root[data-theme="dark"] .vault-toggle {
+  color: var(--text-muted-dark);
+}
+
+.vault-toggle.active {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 4px 12px rgba(87, 89, 146, 0.2);
+}
+
+/* Theme Selector */
+.theme-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted-light);
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+:root[data-theme="dark"] .theme-btn {
+  color: var(--text-muted-dark);
+}
+
+.theme-btn.active {
+  background: var(--card-light);
+  color: var(--primary);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+:root[data-theme="dark"] .theme-btn.active {
+  background: var(--card-dark);
+  color: white;
+}
+
+/* Audit Box - Lighter in Dark Mode */
+.audit-box {
+  background: rgba(87, 89, 146, 0.05) !important;
+  color: var(--text-main-light) !important;
+  border: 1px solid var(--primary) !important;
+}
+
+:root[data-theme="dark"] .audit-box {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Contrast Improvements */
+:root[data-theme="dark"] .description-text {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+:root[data-theme="dark"] .usage-pill {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+/* Usage Pill Styles */
+.usage-pill {
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: rgba(0,0,0,0.05);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.section-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
 }
 
 /* FAB */
