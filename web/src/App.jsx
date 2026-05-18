@@ -430,10 +430,27 @@ export default function App() {
           <img src="/brand_logo.png" width="100" alt="Secura" style={{ alignSelf: "center" }} />
           <h1 className="headline-hero">Secure Your Life</h1>
           <p className="description-text">Professional-grade encryption directly in your browser.</p>
-          <div style={{ display: "flex", justifyContent: "center" }}><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => pushToast("Login Error", "error")} theme="filled_blue" shape="pill" width="320" /></div>
-          <div className="divider"><span>OR</span></div>
-          <button className="primary-btn" onClick={handleGuest}>Continue as Guest</button>
-          <a href="https://github.com/mini-page/Secura/releases" target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "14px", textDecoration: "none" }}>Download Mobile App</a>
+          
+          {state.loading ? (
+             <div className="hero-card" style={{ padding: '20px', textAlign: 'center' }}>
+                <div className="item-icon-box" style={{ margin: '0 auto 12px', animation: 'pulse 1.5s infinite' }}><Icon name="lock" /></div>
+                <p style={{ fontWeight: 800 }}>Verifying Identity...</p>
+             </div>
+          ) : state.token ? (
+             <div className="hero-card panel-animate" style={{ padding: '32px', textAlign: 'center', border: '2px solid var(--primary)' }}>
+                <div className="item-icon-box" style={{ margin: '0 auto 16px', background: 'var(--primary)', color: 'white' }}><Icon name="unlock" /></div>
+                <h3 className="item-title">Access Granted</h3>
+                <p className="description-text" style={{ marginBottom: '20px' }}>Welcome back, {state.user?.name || 'User'}</p>
+                <button className="primary-btn" style={{ width: '100%' }} onClick={() => setActiveTab('home')}>Enter My Vault</button>
+             </div>
+          ) : (
+             <>
+               <div style={{ display: "flex", justifyContent: "center" }}><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => pushToast("Login Error", "error")} theme="filled_blue" shape="pill" width="320" /></div>
+               <div className="divider"><span>OR</span></div>
+               <button className="primary-btn" onClick={handleGuest}>Continue as Guest</button>
+               <a href="https://github.com/mini-page/Secura/releases" target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "14px", textDecoration: "none" }}>Download Mobile App</a>
+             </>
+          )}
         </div>
       </div>
     );
