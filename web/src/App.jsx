@@ -302,6 +302,7 @@ export default function App() {
     try {
       const data = await googleAuth(response.credential);
       setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
+      setIsEntered(true); // Auto-enter
       pushToast("Signed in with Google", "success");
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: "Google Sign-In failed" }));
@@ -313,6 +314,7 @@ export default function App() {
     try {
       const data = await guestLogin();
       setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
+      setIsEntered(true); // Auto-enter
       pushToast("Guest session established", "info");
     } catch {
       setState((s) => ({
@@ -321,6 +323,7 @@ export default function App() {
         token: "offline-guest",
         user: { email: "guest@offline", role: "guest" }
       }));
+      setIsEntered(true); // Auto-enter
       pushToast("Local guest session started", "info");
     }
   }
