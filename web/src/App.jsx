@@ -53,6 +53,7 @@ export default function App() {
   const [noteText, setNoteText] = useState("");
   const [isNoteProcessing, setIsNoteProcessing] = useState(false);
   const [vaultView, setVaultView] = useState("files"); // 'files' or 'notes'
+  const [isEntered, setIsEntered] = useState(false);
 
   const isAuthenticated = !!state.token;
 
@@ -283,7 +284,10 @@ export default function App() {
             <button className="secondary-btn" style={{ flex: 1 }} onClick={() => setVaultOpen(false)}>Cancel</button>
             <button className="primary-btn" style={{ flex: 2 }} onClick={processVault}>Confirm</button>
           </div>
-          <p style={{ fontSize: "11px", opacity: 0.5, marginTop: "16px", textAlign: "center" }}>
+          <p style={{ fontSize: "11px", color: "#ef4444", fontWeight: 800, marginTop: "16px", textAlign: "center" }}>
+            ⚠️ If you forget this password, your data cannot be recovered.
+          </p>
+          <p style={{ fontSize: "11px", opacity: 0.5, marginTop: "8px", textAlign: "center" }}>
             Secura uses Zero-Knowledge encryption. We never see your password.
           </p>
         </div>
@@ -358,7 +362,10 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed?.token) setState((s) => ({ ...s, ...parsed, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
+        if (parsed?.token) {
+          setState((s) => ({ ...s, ...parsed, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
+          setIsEntered(true);
+        }
       } catch { 
         setState(s => ({ ...s, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
         localStorage.removeItem(STORAGE_KEY); 
@@ -667,7 +674,7 @@ export default function App() {
           </div>
           <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
              <h3 className="item-title">Storage</h3>
-             <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444" }} onClick={() => { if(window.confirm("Clear all local activity logs? Files/Keys in downloads will remain.")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("Local logs cleared", "info"); } }}>Clear Activity Logs</button>
+             <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444" }} onClick={() => { if(window.confirm("Clear all recent imports and local activity? Files in your downloads folder will remain.")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("Recent imports cleared", "info"); } }}>Clear Recent Imports & Activity</button>
           </div>
         </>
       )}
