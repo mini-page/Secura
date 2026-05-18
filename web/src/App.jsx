@@ -23,7 +23,7 @@ const initialState = {
   user: null,
   files: [],
   notes: [],
-  decoyPassword: "", // For plausible deniability
+  decoyPassword: "",
   loading: false,
   error: "",
   notice: ""
@@ -41,7 +41,7 @@ export default function App() {
   // Security Vault State
   const [vaultOpen, setVaultOpen] = useState(false);
   const [vaultPassword, setVaultPassword] = useState("");
-  const [vaultAction, setVaultAction] = useState(null); // { type: 'encrypt'|'decrypt'|'note', payload: any }
+  const [vaultAction, setVaultAction] = useState(null); 
   
   const [decryptFile, setDecryptFile] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -52,11 +52,9 @@ export default function App() {
   // Notes state
   const [noteText, setNoteText] = useState("");
   const [isNoteProcessing, setIsNoteProcessing] = useState(false);
-  const [vaultView, setVaultView] = useState("files"); // 'files' or 'notes'
-  const [isEntered, setIsEntered] = useState(false);
+  const [vaultView, setVaultView] = useState("files"); 
 
   const isAuthenticated = !!state.token;
-
   const APK_LINK = "https://github.com/mini-page/Secura/releases/download/v2.0.0/Secura_appV2.apk";
 
   // --- Handlers ---
@@ -76,8 +74,6 @@ export default function App() {
     if (!vaultPassword) return;
     setVaultOpen(false);
     
-    // Decoy Logic: If user enters the decoy password during decryption, 
-    // we show a fake success but don't actually restore the file.
     if (vaultAction?.type === 'decrypt' && state.decoyPassword && vaultPassword === state.decoyPassword) {
       addCryptoLog("Decoy protocol active...");
       setIsProcessing(true);
@@ -169,7 +165,6 @@ export default function App() {
       const decrypted = await decryptBuffer(buffer, password);
       addCryptoLog("Decryption successful.");
       
-      // Smart Note Handling
       if (decryptFile.name.includes("Note_") || decrypted.byteLength < 5000) {
         try {
           const text = new TextDecoder().decode(decrypted);
@@ -244,7 +239,6 @@ export default function App() {
   function SecurityVaultModal() {
     if (!vaultOpen) return null;
 
-    // Calculate password strength
     const strength = useMemo(() => {
       if (!vaultPassword) return 0;
       let score = 0;
@@ -302,7 +296,6 @@ export default function App() {
     try {
       const data = await googleAuth(response.credential);
       setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
-      setIsEntered(true); // Auto-enter
       pushToast("Signed in with Google", "success");
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: "Google Sign-In failed" }));
@@ -314,7 +307,6 @@ export default function App() {
     try {
       const data = await guestLogin();
       setState((s) => ({ ...s, token: data.token, user: data.user, loading: false }));
-      setIsEntered(true); // Auto-enter
       pushToast("Guest session established", "info");
     } catch {
       setState((s) => ({
@@ -323,14 +315,12 @@ export default function App() {
         token: "offline-guest",
         user: { email: "guest@offline", role: "guest" }
       }));
-      setIsEntered(true); // Auto-enter
       pushToast("Local guest session started", "info");
     }
   }
 
   function signOut() {
     setState(initialState);
-    setIsEntered(false);
     localStorage.removeItem(STORAGE_KEY);
     pushToast("Signed out", "info");
   }
@@ -368,10 +358,7 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed?.token) {
-          setState((s) => ({ ...s, ...parsed, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
-          setIsEntered(true);
-        }
+        if (parsed?.token) setState((s) => ({ ...s, ...parsed, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
       } catch { 
         setState(s => ({ ...s, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
         localStorage.removeItem(STORAGE_KEY); 
@@ -430,7 +417,7 @@ export default function App() {
   }
 
   // --- Auth Gateway ---
-  if (!isAuthenticated || !isEntered) {
+  if (!isAuthenticated) {
     return (
       <div className="auth-hero">
         {showSplash && (
@@ -448,15 +435,6 @@ export default function App() {
              <div className="hero-card" style={{ padding: '20px', textAlign: 'center' }}>
                 <div className="item-icon-box" style={{ margin: '0 auto 12px', animation: 'pulse 1.5s infinite' }}><Icon name="lock" /></div>
                 <p style={{ fontWeight: 800 }}>Verifying Identity...</p>
-             </div>
-          ) : state.token ? (
-             <div className="hero-card panel-animate" style={{ padding: '32px', textAlign: 'center', border: '2px solid var(--primary)', background: 'rgba(87, 89, 146, 0.05)' }}>
-                <div className="item-icon-box" style={{ margin: '0 auto 16px', background: 'var(--primary)', color: 'white' }}><Icon name="unlock" size={32} /></div>
-                <h3 className="item-title" style={{ fontSize: '24px' }}>Access Granted</h3>
-                <p className="description-text" style={{ marginBottom: '24px', fontSize: '15px' }}>Identity verified. Your secure environment is ready.</p>
-                <button className="primary-btn" style={{ width: '100%', padding: '20px' }} onClick={() => setIsEntered(true)}>
-                    Enter Secure Vault
-                </button>
              </div>
           ) : (
              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
@@ -639,7 +617,7 @@ export default function App() {
              </div>
           </div>
           
-          <div style={{ display: 'none' }}> {/* Hidden as requested */}
+          <div style={{ display: 'none' }}>
             <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
                 <h3 className="item-title">Plausible Deniability (Decoy)</h3>
                 <p className="description-text">Set a secondary password. If entered during decryption, Secura will load a fake environment to protect your real data.</p>
