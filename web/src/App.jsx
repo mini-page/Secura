@@ -31,12 +31,19 @@ const initialState = {
 
 const themeOptions = ["light", "dark", "system"];
 
+// --- App Stages ---
+const STAGE = {
+  SPLASH: "splash",
+  AUTH: "auth",
+  DASHBOARD: "dashboard"
+};
+
 export default function App() {
   const [state, setState] = useState(initialState);
+  const [appStage, setAppStage] = useState(STAGE.SPLASH);
   const [activeTab, setActiveTab] = useState("home");
   const [toasts, setToasts] = useState([]);
   const [theme, setTheme] = useState("light"); 
-  const [showSplash, setShowSplash] = useState(true);
   
   // Security Vault State
   const [vaultOpen, setVaultOpen] = useState(false);
@@ -323,6 +330,7 @@ export default function App() {
     setState(initialState);
     localStorage.removeItem(STORAGE_KEY);
     pushToast("Signed out", "info");
+    setAppStage(STAGE.AUTH);
   }
 
   function pushToast(message, type = "info") {
@@ -333,7 +341,7 @@ export default function App() {
     }, 3000);
   }
 
-  // --- Effects ---
+  // --- Core Lifecycle Controller ---
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -358,7 +366,11 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed?.token) setState((s) => ({ ...s, ...parsed, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
+        if (parsed?.token) {
+          setState((s) => ({ ...s, ...parsed, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
+        } else {
+          setState(s => ({ ...s, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
+        }
       } catch { 
         setState(s => ({ ...s, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
         localStorage.removeItem(STORAGE_KEY); 
@@ -367,12 +379,26 @@ export default function App() {
       setState(s => ({ ...s, files: initialFiles, notes: initialNotes, decoyPassword: savedDecoy || "" }));
     }
 
-    if (seenSplash) setShowSplash(false);
-  }, []);
+    // Phase 1: Splash to Auth/Dashboard
+    const timer = setTimeout(() => {
+      setAppStage(isAuthenticated ? STAGE.DASHBOARD : STAGE.AUTH);
+    }, seenSplash ? 100 : 2200);
+    
+    if (!seenSplash) localStorage.setItem(SPLASH_KEY, "1");
+    
+    return () => clearTimeout(timer);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    if (state.token) localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: state.token, user: state.user }));
-  }, [state.token, state.user]);
+    if (state.token) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: state.token, user: state.user }));
+      // Direct jump to dashboard if token appears after initial mount (e.g. login)
+      if (appStage === STAGE.AUTH) {
+        const t = setTimeout(() => setAppStage(STAGE.DASHBOARD), 600);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [state.token, state.user, appStage]);
 
   useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
@@ -382,15 +408,6 @@ export default function App() {
       root.dataset.theme = prefersDark ? "dark" : "light";
     } else { root.dataset.theme = theme; }
   }, [theme]);
-
-  useEffect(() => {
-    if (!showSplash) return;
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-      localStorage.setItem(SPLASH_KEY, "1");
-    }, 2400);
-    return () => clearTimeout(timer);
-  }, [showSplash]);
 
   const team = [
     { name: "Umang Gupta", role: "Lead & System Architecture Designer", focus: "System Design & Architecture", accent: "accent-sky" },
@@ -416,288 +433,303 @@ export default function App() {
     }
   }
 
-  // --- Auth Gateway ---
-  if (!isAuthenticated) {
-    return (
-      <div className="auth-hero">
-        {showSplash && (
-          <div className="splash">
-            <img src="/brand_logo.png" width="120" alt="Logo" />
-            <h1 className="splash-title">Secura</h1>
-          </div>
-        )}
-        <div className="auth-panel panel-animate">
-          <img src="/brand_logo.png" width="100" alt="Secura" style={{ alignSelf: "center", marginBottom: "1rem" }} />
-          <h1 className="headline-hero">Secure Your Life</h1>
-          <p className="description-text">Professional-grade encryption directly in your browser. Private, local-first, and zero-knowledge.</p>
-          
-          {state.loading ? (
-             <div className="hero-card" style={{ padding: '20px', textAlign: 'center' }}>
-                <div className="item-icon-box" style={{ margin: '0 auto 12px', animation: 'pulse 1.5s infinite' }}><Icon name="lock" /></div>
-                <p style={{ fontWeight: 800 }}>Verifying Identity...</p>
-             </div>
-          ) : (
-             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
-               <div style={{ display: "flex", justifyContent: "center" }}><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => pushToast("Login Error", "error")} theme="filled_blue" shape="pill" width="320" /></div>
-               <div className="divider"><span>OR</span></div>
-               <button className="primary-btn" style={{ background: 'var(--primary)', color: 'white', fontWeight: 800 }} onClick={handleGuest}>Continue as Guest</button>
-               <div style={{ textAlign: 'center', marginTop: '12px' }}>
-                <a href={APK_LINK} target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "13px", textDecoration: "none" }}>Get Mobile App for Cloud Sync</a>
-               </div>
-             </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   const recentFiles = [...state.files, ...state.notes.map(n => ({ ...n, isNote: true }))].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 3);
   const totalMB = (state.files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0) / (1024 * 1024)).toFixed(1);
 
-  // --- Main Dashboard ---
+  // --- Rendering Controller ---
+  
   return (
-    <div className="page">
-      <div className="app-header"><h1>Secura</h1></div>
-
-      {activeTab === "home" && (
-        <>
-          <div className="hero-card">
-            <img src="/brand_logo.png" style={{ width: 110 }} alt="Brand" />
-            <h2 className="headline-hero">Secure Your Life</h2>
-            <p className="description-text">Move sensitive files to your private vault in seconds.</p>
-            <div style={{ display: 'flex', gap: '12px', width: '100%', marginTop: '12px' }}>
-                <button className="primary-btn" style={{ flex: 1 }} onClick={() => { setActiveTab("vault"); setVaultView("files"); }}><Icon name="plus" size={20} /> Files</button>
-                <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setActiveTab("vault"); setVaultView("notes"); }}><Icon name="notes" size={20} /> Notes</button>
-            </div>
-          </div>
-
-          <div className="hero-card panel-animate" style={{ background: "linear-gradient(135deg, var(--primary) 0%, #7c7eb9 100%)", color: "white", textAlign: "left", alignItems: "flex-start" }}>
-             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                <div style={{ background: "rgba(255,255,255,0.2)", padding: "10px", borderRadius: "12px" }}><Icon name="unlock" size={24} /></div>
-                <h3 className="item-title" style={{ color: "white", margin: 0 }}>Unlock Cloud Sync</h3>
-             </div>
-             <p style={{ fontSize: "14px", opacity: 0.9, lineHeight: 1.5, margin: "12px 0" }}>
-                Take your secure vault anywhere. Sync files across devices and set up emergency inheritance with the Secura Mobile App.
-             </p>
-             <button className="secondary-btn" style={{ background: "white", color: "var(--primary)", border: "none" }} onClick={() => window.open(APK_LINK, "_blank")}>Get the App</button>
-          </div>
-
-          <div className="section-meta">
-            <span className="label-caps">Recent Imports</span>
-            <span className="usage-pill">{totalMB} MB USED</span>
-          </div>
-          <p className="description-text" style={{ fontSize: '12px', marginBottom: '12px', opacity: 0.7 }}>A reminder of the items you've recently secured on this device.</p>
-          
-          <div className="list-stack">
-            {recentFiles.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "40px", opacity: 0.3 }}><Icon name="info" size={48} /><p style={{ fontWeight: 700, marginTop: "12px" }}>No Recent Activity</p></div>
-            ) : (
-              recentFiles.map(item => (
-                <div key={item.fileId || item.id} className="item-card">
-                   <div className="item-icon-box"><Icon name={item.isNote ? "notes" : "file"} /></div>
-                   <div className="item-body">
-                      <p className="item-title">{item.originalName || item.title}</p>
-                      <p className="item-subtitle">{item.isNote ? "Secure Note" : `${(item.sizeBytes / 1024).toFixed(1)} KB`} • {new Date(item.createdAt).toLocaleDateString()}</p>
-                   </div>
-                </div>
-              ))
-            )}
-          </div>
-        </>
+    <div className={`app-shell stage-${appStage}`}>
+      
+      {/* 1. Splash Stage */}
+      {appStage === STAGE.SPLASH && (
+        <div className="splash">
+          <img src="/brand_logo.png" width="120" alt="Logo" />
+          <h1 className="splash-title">Secura</h1>
+        </div>
       )}
 
-      {activeTab === "vault" && (
-        <>
-          <div className="section-meta" style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
-            <div className="theme-selector-app" style={{ display: 'flex', background: 'var(--card-bg)', padding: '4px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                <button className={`vault-toggle ${vaultView === 'files' ? 'active' : ''}`} onClick={() => setVaultView('files')}>Files</button>
-                <button className={`vault-toggle ${vaultView === 'notes' ? 'active' : ''}`} onClick={() => setVaultView('notes')}>Notes</button>
-            </div>
-          </div>
-
-          {vaultView === 'files' ? (
-            <>
-              <div className={`dropzone ${isDragActive ? 'active' : ''}`} onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }} onDragLeave={() => setIsDragActive(false)} onDrop={onDrop} onClick={() => document.getElementById('encrypt-input').click()}>
-                <div className="item-icon-box" style={{ width: 80, height: 80, borderRadius: 20 }}><Icon name="lock" size={40} /></div>
-                <h2 className="headline-hero" style={{ fontSize: 24 }}>Encrypt & Secure</h2>
-                <p className="description-text">Drag and drop any file to create a secure container.</p>
-                <input id="encrypt-input" type="file" onChange={(e) => openVault('encrypt', e.target.files[0])} style={{ display: "none" }} />
-              </div>
-
-              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", padding: "32px", marginTop: '24px' }}>
-                <h3 className="item-title">Decrypt & Restore</h3>
-                <p className="description-text">Select your .secura container to recover your files.</p>
-                <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
-                    <label className="secondary-btn" style={{ cursor: "pointer", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <Icon name="file" size={18} />
-                        {decryptFile ? decryptFile.name : "Select .secura Container"}
-                        <input type="file" onChange={(e) => setDecryptFile(e.target.files[0])} style={{ display: "none" }} />
-                    </label>
-                    <button className="primary-btn" disabled={!decryptFile || isProcessing} onClick={() => openVault('decrypt')}>
-                        {isProcessing ? "Restoring..." : <><Icon name="unlock" size={18} /> Decrypt & Download</>}
-                    </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="hero-card" style={{ alignItems: "stretch", textAlign: "left" }}>
-                <h3 className="item-title" style={{ marginBottom: '12px' }}>Secure Notepad</h3>
-                <textarea className="note-input-area" style={{ minHeight: '200px' }} placeholder="Write your sensitive note here... It will be encrypted before being saved." value={noteText} onChange={e => setNoteText(e.target.value)} />
-                <button className="primary-btn" style={{ marginTop: '12px' }} disabled={isNoteProcessing || !noteText.trim()} onClick={() => openVault('note')}>
-                    {isNoteProcessing ? "Securing..." : <><Icon name="lock" size={18} /> Encrypt & Download Note</>}
-                </button>
-              </div>
-              <p className="description-text" style={{ fontSize: 13, opacity: 0.7, textAlign: 'center', marginTop: '12px' }}>Notes are encrypted in your browser using <strong>AES-256-GCM</strong>. You will need your password to decrypt.</p>
+      {/* 2. Auth Stage */}
+      {appStage === STAGE.AUTH && (
+        <div className="auth-hero">
+           <div className="auth-panel panel-animate">
+              <img src="/brand_logo.png" width="100" alt="Secura" style={{ alignSelf: "center", marginBottom: "1rem" }} />
+              <h1 className="headline-hero">Secure Your Life</h1>
+              <p className="description-text">Professional-grade encryption directly in your browser. Private, local-first, and zero-knowledge.</p>
               
-              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", padding: "32px", marginTop: '24px' }}>
-                <h3 className="item-title">Decrypt Note</h3>
-                <p className="description-text">Select a secured note file to view its content.</p>
-                <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
-                    <label className="secondary-btn" style={{ cursor: "pointer", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <Icon name="notes" size={18} />
-                        {decryptFile ? decryptFile.name : "Select Secure Note"}
-                        <input type="file" onChange={(e) => setDecryptFile(e.target.files[0])} style={{ display: "none" }} />
-                    </label>
-                    <button className="primary-btn" disabled={!decryptFile || isProcessing} onClick={() => openVault('decrypt')}>
-                        {isProcessing ? "Restoring..." : <><Icon name="unlock" size={18} /> Decrypt & Preview</>}
-                    </button>
+              {state.loading ? (
+                <div className="hero-card" style={{ padding: '20px', textAlign: 'center' }}>
+                    <div className="item-icon-box" style={{ margin: '0 auto 12px', animation: 'pulse 1.5s infinite' }}><Icon name="lock" /></div>
+                    <p style={{ fontWeight: 800 }}>Verifying Identity...</p>
                 </div>
+              ) : isAuthenticated ? (
+                <div className="hero-card panel-animate" style={{ padding: '32px', textAlign: 'center', border: '2px solid var(--primary)', background: 'rgba(87, 89, 146, 0.05)' }}>
+                    <div className="item-icon-box" style={{ margin: '0 auto 16px', background: 'var(--primary)', color: 'white' }}><Icon name="unlock" size={32} /></div>
+                    <h3 className="item-title">Access Granted</h3>
+                    <p className="description-text">Syncing environment...</p>
+                    <button className="primary-btn" style={{ width: '100%', marginTop: '12px' }} onClick={() => setAppStage(STAGE.DASHBOARD)}>Enter Now</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
+                  <div style={{ display: "flex", justifyContent: "center" }}><GoogleLogin onSuccess={handleGoogleSuccess} onError={() => pushToast("Login Error", "error")} theme="filled_blue" shape="pill" width="320" /></div>
+                  <div className="divider"><span>OR</span></div>
+                  <button className="primary-btn" style={{ background: 'var(--primary)', color: 'white', fontWeight: 800 }} onClick={handleGuest}>Continue as Guest</button>
+                  <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                    <a href={APK_LINK} target="_blank" rel="noreferrer" style={{ color: "var(--primary)", fontWeight: "900", fontSize: "13px", textDecoration: "none" }}>Get Mobile App for Cloud Sync</a>
+                  </div>
+                </div>
+              )}
+           </div>
+        </div>
+      )}
+
+      {/* 3. Dashboard Stage */}
+      {appStage === STAGE.DASHBOARD && (
+        <div className="page panel-animate">
+          <div className="app-header"><h1>Secura</h1></div>
+
+          {activeTab === "home" && (
+            <>
+              <div className="hero-card">
+                <img src="/brand_logo.png" style={{ width: 110 }} alt="Brand" />
+                <h2 className="headline-hero">Secure Your Life</h2>
+                <p className="description-text">Move sensitive files to your private vault in seconds.</p>
+                <div style={{ display: 'flex', gap: '12px', width: '100%', marginTop: '12px' }}>
+                    <button className="primary-btn" style={{ flex: 1 }} onClick={() => { setActiveTab("vault"); setVaultView("files"); }}><Icon name="plus" size={20} /> Files</button>
+                    <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setActiveTab("vault"); setVaultView("notes"); }}><Icon name="notes" size={20} /> Notes</button>
+                </div>
+              </div>
+
+              <div className="hero-card panel-animate" style={{ background: "linear-gradient(135deg, var(--primary) 0%, #7c7eb9 100%)", color: "white", textAlign: "left", alignItems: "flex-start" }}>
+                 <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                    <div style={{ background: "rgba(255,255,255,0.2)", padding: "10px", borderRadius: "12px" }}><Icon name="unlock" size={24} /></div>
+                    <h3 className="item-title" style={{ color: "white", margin: 0 }}>Unlock Cloud Sync</h3>
+                 </div>
+                 <p style={{ fontSize: "14px", opacity: 0.9, lineHeight: 1.5, margin: "12px 0" }}>
+                    Take your secure vault anywhere. Sync files across devices and set up emergency inheritance with the Secura Mobile App.
+                 </p>
+                 <button className="secondary-btn" style={{ background: "white", color: "var(--primary)", border: "none" }} onClick={() => window.open(APK_LINK, "_blank")}>Get the App</button>
+              </div>
+
+              <div className="section-meta">
+                <span className="label-caps">Recent Imports</span>
+                <span className="usage-pill">{totalMB} MB USED</span>
+              </div>
+              <p className="description-text" style={{ fontSize: '12px', marginBottom: '12px', opacity: 0.7 }}>A reminder of the items you've recently secured on this device.</p>
+              
+              <div className="list-stack">
+                {recentFiles.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "40px", opacity: 0.3 }}><Icon name="info" size={48} /><p style={{ fontWeight: 700, marginTop: "12px" }}>No Recent Activity</p></div>
+                ) : (
+                  recentFiles.map(item => (
+                    <div key={item.fileId || item.id} className="item-card">
+                       <div className="item-icon-box"><Icon name={item.isNote ? "notes" : "file"} /></div>
+                       <div className="item-body">
+                          <p className="item-title">{item.originalName || item.title}</p>
+                          <p className="item-subtitle">{item.isNote ? "Secure Note" : `${(item.sizeBytes / 1024).toFixed(1)} KB`} • {new Date(item.createdAt).toLocaleDateString()}</p>
+                       </div>
+                    </div>
+                  ))
+                )}
               </div>
             </>
           )}
 
-          {decryptedNotePreview && (
-            <div className="hero-card panel-animate" style={{ marginTop: "2rem", textAlign: "left", alignItems: "flex-start", border: "2px solid var(--primary)", background: "rgba(87, 89, 146, 0.05)" }}>
-               <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
-                  <h3 className="item-title">Restored Note Preview</h3>
-                  <button className="usage-pill" style={{ cursor: "pointer", border: "none" }} onClick={() => setDecryptedNotePreview(null)}>CLOSE</button>
-               </div>
-               <div style={{ background: "var(--card-bg)", width: "100%", padding: "20px", borderRadius: "16px", marginTop: "12px", whiteSpace: "pre-wrap", border: "1px solid var(--border)", maxHeight: "300px", overflowY: "auto", fontSize: "15px" }}>
-                  {decryptedNotePreview}
-               </div>
-               <button className="secondary-btn" style={{ marginTop: "1rem", width: '100%' }} onClick={() => {
-                  const blob = new Blob([decryptedNotePreview], { type: "text/plain" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = "Decrypted_Note.txt";
-                  a.click();
-                  URL.revokeObjectURL(url);
-               }}>Download as Text File</button>
-            </div>
-          )}
-
-          {cryptoLogs.length > 0 && (
-            <div className="terminal-box">
-               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", fontSize: "11px", fontWeight: 900, letterSpacing: 2 }}>
-                  <Icon name="terminal" size={14} /> SECURITY CONSOLE
-               </div>
-               {cryptoLogs.map((log, i) => (
-                 <div key={i} style={{ marginBottom: "4px", opacity: 1 - (i * 0.15) }}>{log}</div>
-               ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {activeTab === "settings" && (
-        <>
-          <div className="section-meta"><span className="label-caps">Settings</span></div>
-          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
-             <h3 className="item-title">Account</h3><p className="item-subtitle">{state.user?.email || "Guest Session"}</p>
-             <button className="primary-btn" style={{ marginTop: "12px", background: "#ef4444" }} onClick={signOut}>Sign Out</button>
-          </div>
-          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
-             <h3 className="item-title">Appearance</h3>
-             <div className="theme-selector-app" style={{ display: "flex", gap: "8px", marginTop: "16px", background: 'rgba(0,0,0,0.05)', padding: '6px', borderRadius: '14px' }}>
-                {themeOptions.map(opt => (
-                  <button key={opt} className={`theme-btn ${theme === opt ? 'active' : ''}`} onClick={() => setTheme(opt)}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</button>
-                ))}
-             </div>
-          </div>
-          
-          <div style={{ display: 'none' }}>
-            <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
-                <h3 className="item-title">Plausible Deniability (Decoy)</h3>
-                <p className="description-text">Set a secondary password. If entered during decryption, Secura will load a fake environment to protect your real data.</p>
-                <input 
-                    type="password" 
-                    className="note-input-area" 
-                    style={{ height: "48px", minHeight: "48px", marginBottom: "12px" }} 
-                    placeholder="Set Decoy Password" 
-                    value={state.decoyPassword}
-                    onChange={e => {
-                    const val = e.target.value;
-                    setState(s => ({ ...s, decoyPassword: val }));
-                    localStorage.setItem(DECOY_KEY, val);
-                    }}
-                />
-                {state.decoyPassword && <p style={{ fontSize: "11px", color: "#10b981", fontWeight: 800 }}>Decoy Protocol Active</p>}
-            </div>
-          </div>
-
-          <div className="section-meta"><span className="label-caps">System Capabilities Map</span></div>
-          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", gap: "20px" }}>
-             <div style={{ width: "100%" }}>
-                <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 900 }}>Current (Secura Web)</h4>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                   <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>LOCAL SANDBOX</span>
-                   <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>PBKDF2-AES256</span>
-                   <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>ZERO KNOWLEDGE</span>
+          {activeTab === "vault" && (
+            <>
+              <div className="section-meta" style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+                <div className="theme-selector-app" style={{ display: 'flex', background: 'var(--card-bg)', padding: '4px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <button className={`vault-toggle ${vaultView === 'files' ? 'active' : ''}`} onClick={() => setVaultView('files')}>Files</button>
+                    <button className={`vault-toggle ${vaultView === 'notes' ? 'active' : ''}`} onClick={() => setVaultView('notes')}>Notes</button>
                 </div>
-             </div>
-             <div style={{ width: "100%", opacity: 0.6 }}>
-                <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 900 }}>Coming Soon (Secura Mobile)</h4>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                   <span className="usage-pill">CLOUD DRIVE SYNC</span>
-                   <span className="usage-pill">INHERITANCE PROTOCOL</span>
-                   <span className="usage-pill">CROSS-DEVICE ACCESS</span>
-                   <span className="usage-pill">BIOMETRIC AUTH</span>
-                </div>
-             </div>
-             <button className="primary-btn" style={{ marginTop: "10px" }} onClick={() => window.open(APK_LINK, "_blank")}>Explore Pro Features</button>
-          </div>
-          <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
-             <h3 className="item-title">Storage</h3>
-             <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444" }} onClick={() => { if(window.confirm("Clear all recent imports and local activity? Files in your downloads folder will remain.")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("Recent imports cleared", "info"); } }}>Clear Recent Imports & Activity</button>
-          </div>
-        </>
-      )}
-
-      {activeTab === "about" && (
-        <>
-          <div className="section-meta"><span className="label-caps">Our Team</span></div>
-          <div className="team-grid">
-            {team.map(m => (
-              <div key={m.name} className="team-card">
-                 <div className="team-avatar">{m.name[0]}</div>
-                 <p className="team-name">{m.name}</p>
-                 <span className="team-role">{m.role}</span>
-                 <p className="team-focus">{m.focus}</p>
               </div>
-            ))}
-          </div>
-          <div className="terminal-box audit-box" style={{ background: "rgba(87, 89, 146, 0.05)", border: "1px solid var(--primary)" }}>
-             <h3 style={{ fontSize: 16, fontWeight: 900 }}>🛡️ Technical Audit (Web)</h3>
-             <p style={{ fontSize: 14, lineHeight: 1.6, opacity: 0.8 }}>This project implements <strong>Zero-Knowledge Encryption</strong> via the W3C Web Crypto API. Keys are derived from your password using <strong>PBKDF2</strong> with 100,000 iterations. Data is secured using <strong>AES-256-GCM</strong>. Your raw passwords and keys never leave your browser memory, ensuring a private, local-first sandbox experience.</p>
-          </div>
-        </>
+
+              {vaultView === 'files' ? (
+                <>
+                  <div className={`dropzone ${isDragActive ? 'active' : ''}`} onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }} onDragLeave={() => setIsDragActive(false)} onDrop={onDrop} onClick={() => document.getElementById('encrypt-input').click()}>
+                    <div className="item-icon-box" style={{ width: 80, height: 80, borderRadius: 20 }}><Icon name="lock" size={40} /></div>
+                    <h2 className="headline-hero" style={{ fontSize: 24 }}>Encrypt & Secure</h2>
+                    <p className="description-text">Drag and drop any file to create a secure container.</p>
+                    <input id="encrypt-input" type="file" onChange={(e) => openVault('encrypt', e.target.files[0])} style={{ display: "none" }} />
+                  </div>
+
+                  <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", padding: "32px", marginTop: '24px' }}>
+                    <h3 className="item-title">Decrypt & Restore</h3>
+                    <p className="description-text">Select your .secura container to recover your files.</p>
+                    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
+                        <label className="secondary-btn" style={{ cursor: "pointer", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                            <Icon name="file" size={18} />
+                            {decryptFile ? decryptFile.name : "Select .secura Container"}
+                            <input type="file" onChange={(e) => setDecryptFile(e.target.files[0])} style={{ display: "none" }} />
+                        </label>
+                        <button className="primary-btn" disabled={!decryptFile || isProcessing} onClick={() => openVault('decrypt')}>
+                            {isProcessing ? "Restoring..." : <><Icon name="unlock" size={18} /> Decrypt & Download</>}
+                        </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="hero-card" style={{ alignItems: "stretch", textAlign: "left" }}>
+                    <h3 className="item-title" style={{ marginBottom: '12px' }}>Secure Notepad</h3>
+                    <textarea className="note-input-area" style={{ minHeight: '200px' }} placeholder="Write your sensitive note here... It will be encrypted before being saved." value={noteText} onChange={e => setNoteText(e.target.value)} />
+                    <button className="primary-btn" style={{ marginTop: '12px' }} disabled={isNoteProcessing || !noteText.trim()} onClick={() => openVault('note')}>
+                        {isNoteProcessing ? "Securing..." : <><Icon name="lock" size={18} /> Encrypt & Download Note</>}
+                    </button>
+                  </div>
+                  <p className="description-text" style={{ fontSize: 13, opacity: 0.7, textAlign: 'center', marginTop: '12px' }}>Notes are encrypted in your browser using <strong>AES-256-GCM</strong>. You will need your password to decrypt.</p>
+                  
+                  <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", padding: "32px", marginTop: '24px' }}>
+                    <h3 className="item-title">Decrypt Note</h3>
+                    <p className="description-text">Select a secured note file to view its content.</p>
+                    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
+                        <label className="secondary-btn" style={{ cursor: "pointer", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                            <Icon name="notes" size={18} />
+                            {decryptFile ? decryptFile.name : "Select Secure Note"}
+                            <input type="file" onChange={(e) => setDecryptFile(e.target.files[0])} style={{ display: "none" }} />
+                        </label>
+                        <button className="primary-btn" disabled={!decryptFile || isProcessing} onClick={() => openVault('decrypt')}>
+                            {isProcessing ? "Restoring..." : <><Icon name="unlock" size={18} /> Decrypt & Preview</>}
+                        </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {decryptedNotePreview && (
+                <div className="hero-card panel-animate" style={{ marginTop: "2rem", textAlign: "left", alignItems: "flex-start", border: "2px solid var(--primary)", background: "rgba(87, 89, 146, 0.05)" }}>
+                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
+                      <h3 className="item-title">Restored Note Preview</h3>
+                      <button className="usage-pill" style={{ cursor: "pointer", border: "none" }} onClick={() => setDecryptedNotePreview(null)}>CLOSE</button>
+                   </div>
+                   <div style={{ background: "var(--card-bg)", width: "100%", padding: "20px", borderRadius: "16px", marginTop: "12px", whiteSpace: "pre-wrap", border: "1px solid var(--border)", maxHeight: "300px", overflowY: "auto", fontSize: "15px" }}>
+                      {decryptedNotePreview}
+                   </div>
+                   <button className="secondary-btn" style={{ marginTop: "1rem", width: '100%' }} onClick={() => {
+                      const blob = new Blob([decryptedNotePreview], { type: "text/plain" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "Decrypted_Note.txt";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                   }}>Download as Text File</button>
+                </div>
+              )}
+
+              {cryptoLogs.length > 0 && (
+                <div className="terminal-box">
+                   <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", fontSize: "11px", fontWeight: 900, letterSpacing: 2 }}>
+                      <Icon name="terminal" size={14} /> SECURITY CONSOLE
+                   </div>
+                   {cryptoLogs.map((log, i) => (
+                     <div key={i} style={{ marginBottom: "4px", opacity: 1 - (i * 0.15) }}>{log}</div>
+                   ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {activeTab === "settings" && (
+            <>
+              <div className="section-meta"><span className="label-caps">Settings</span></div>
+              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                 <h3 className="item-title">Account</h3><p className="item-subtitle">{state.user?.email || "Guest Session"}</p>
+                 <button className="primary-btn" style={{ marginTop: "12px", background: "#ef4444" }} onClick={signOut}>Sign Out</button>
+              </div>
+              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                 <h3 className="item-title">Appearance</h3>
+                 <div className="theme-selector-app" style={{ display: "flex", gap: "8px", marginTop: "16px", background: 'rgba(0,0,0,0.05)', padding: '6px', borderRadius: '14px' }}>
+                    {themeOptions.map(opt => (
+                      <button key={opt} className={`theme-btn ${theme === opt ? 'active' : ''}`} onClick={() => setTheme(opt)}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</button>
+                    ))}
+                 </div>
+              </div>
+              
+              <div style={{ display: 'none' }}>
+                <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                    <h3 className="item-title">Plausible Deniability (Decoy)</h3>
+                    <p className="description-text">Set a secondary password. If entered during decryption, Secura will load a fake environment to protect your real data.</p>
+                    <input 
+                        type="password" 
+                        className="note-input-area" 
+                        style={{ height: "48px", minHeight: "48px", marginBottom: "12px" }} 
+                        placeholder="Set Decoy Password" 
+                        value={state.decoyPassword}
+                        onChange={e => {
+                        const val = e.target.value;
+                        setState(s => ({ ...s, decoyPassword: val }));
+                        localStorage.setItem(DECOY_KEY, val);
+                        }}
+                    />
+                    {state.decoyPassword && <p style={{ fontSize: "11px", color: "#10b981", fontWeight: 800 }}>Decoy Protocol Active</p>}
+                </div>
+              </div>
+
+              <div className="section-meta"><span className="label-caps">System Capabilities Map</span></div>
+              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", gap: "20px" }}>
+                 <div style={{ width: "100%" }}>
+                    <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 900 }}>Current (Secura Web)</h4>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                       <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>LOCAL SANDBOX</span>
+                       <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>PBKDF2-AES256</span>
+                       <span className="usage-pill" style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>ZERO KNOWLEDGE</span>
+                    </div>
+                 </div>
+                 <div style={{ width: "100%", opacity: 0.6 }}>
+                    <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 900 }}>Coming Soon (Secura Mobile)</h4>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                       <span className="usage-pill">CLOUD DRIVE SYNC</span>
+                       <span className="usage-pill">INHERITANCE PROTOCOL</span>
+                       <span className="usage-pill">CROSS-DEVICE ACCESS</span>
+                       <span className="usage-pill">BIOMETRIC AUTH</span>
+                    </div>
+                 </div>
+                 <button className="primary-btn" style={{ marginTop: "10px" }} onClick={() => window.open(APK_LINK, "_blank")}>Explore Pro Features</button>
+              </div>
+              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                 <h3 className="item-title">Storage</h3>
+                 <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444" }} onClick={() => { if(window.confirm("Clear all recent imports and local activity? Files in your downloads folder will remain.")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("Recent imports cleared", "info"); } }}>Clear Recent Imports & Activity</button>
+              </div>
+            </>
+          )}
+
+          {activeTab === "about" && (
+            <>
+              <div className="section-meta"><span className="label-caps">Our Team</span></div>
+              <div className="team-grid">
+                {team.map(m => (
+                  <div key={m.name} className="team-card">
+                     <div className="team-avatar">{m.name[0]}</div>
+                     <p className="team-name">{m.name}</p>
+                     <span className="team-role">{m.role}</span>
+                     <p className="team-focus">{m.focus}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="terminal-box audit-box" style={{ background: "rgba(87, 89, 146, 0.05)", border: "1px solid var(--primary)" }}>
+                 <h3 style={{ fontSize: 16, fontWeight: 900 }}>🛡️ Technical Audit (Web)</h3>
+                 <p style={{ fontSize: 14, lineHeight: 1.6, opacity: 0.8 }}>This project implements <strong>Zero-Knowledge Encryption</strong> via the W3C Web Crypto API. Keys are derived from your password using <strong>PBKDF2</strong> with 100,000 iterations. Data is secured using <strong>AES-256-GCM</strong>. Your raw passwords and keys never leave your browser memory, ensuring a private, local-first sandbox experience.</p>
+              </div>
+            </>
+          )}
+
+          <nav className="bottom-nav">
+            <button className={`nav-item ${activeTab === "home" ? 'active' : ''}`} onClick={() => setActiveTab("home")}><Icon name="home" size={24} /><span className="nav-label">Home</span></button>
+            <button className={`nav-item ${activeTab === "vault" ? 'active' : ''}`} onClick={() => setActiveTab("vault")}><Icon name="lock" size={24} /><span className="nav-label">Vault</span></button>
+            <button className={`nav-item ${activeTab === "settings" ? 'active' : ''}`} onClick={() => setActiveTab("settings")}><Icon name="settings" size={24} /><span className="nav-label">Settings</span></button>
+            <button className={`nav-item ${activeTab === "about" ? 'active' : ''}`} onClick={() => setActiveTab("about")}><Icon name="info" size={24} /><span className="nav-label">About</span></button>
+          </nav>
+        </div>
       )}
 
       <SecurityVaultModal />
-      <div className="toast-stack">{toasts.map((t) => <div key={t.id} className={`toast`}>{t.message}</div>)}</div>
+      <div className="toast-stack">{toasts.map((t) => <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>)}</div>
 
-      {activeTab !== "vault" && (
+      {activeTab !== "vault" && appStage === STAGE.DASHBOARD && (
         <div className="fab-container"><button className="fab" onClick={() => setActiveTab("vault")}><Icon name="plus" size={32} /></button></div>
       )}
 
-      <nav className="bottom-nav">
-        <button className={`nav-item ${activeTab === "home" ? 'active' : ''}`} onClick={() => setActiveTab("home")}><Icon name="home" size={24} /><span className="nav-label">Home</span></button>
-        <button className={`nav-item ${activeTab === "vault" ? 'active' : ''}`} onClick={() => setActiveTab("vault")}><Icon name="lock" size={24} /><span className="nav-label">Vault</span></button>
-        <button className={`nav-item ${activeTab === "settings" ? 'active' : ''}`} onClick={() => setActiveTab("settings")}><Icon name="settings" size={24} /><span className="nav-label">Settings</span></button>
-        <button className={`nav-item ${activeTab === "about" ? 'active' : ''}`} onClick={() => setActiveTab("about")}><Icon name="info" size={24} /><span className="nav-label">About</span></button>
-      </nav>
     </div>
   );
 }
