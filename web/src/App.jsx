@@ -29,6 +29,8 @@ const initialState = {
   loading: false
 };
 
+const themeOptions = ["light", "dark", "system"];
+
 export default function App() {
   const [state, setState] = useState(initialState);
   const [appStage, setAppStage] = useState(STAGE.SPLASH);
@@ -51,8 +53,6 @@ export default function App() {
   const [vaultView, setVaultView] = useState("files"); 
 
   const APK_LINK = "https://github.com/mini-page/Secura/releases/download/v2.0.0/Secura_appV2.apk";
-
-  // --- Core Handlers ---
 
   const pushToast = useCallback((message, type = "info") => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -100,8 +100,6 @@ export default function App() {
     setAppStage(STAGE.AUTH);
   }
 
-  // --- Cryptography Handlers ---
-
   async function processVault() {
     if (!vaultPassword) return;
     setVaultOpen(false);
@@ -138,7 +136,6 @@ export default function App() {
     try {
       const buffer = await decryptFile.arrayBuffer();
       const decrypted = await decryptBuffer(buffer, password);
-      
       if (decryptFile.name.includes("Note_") || decrypted.byteLength < 10000) {
         try {
           const text = new TextDecoder().decode(decrypted);
@@ -149,7 +146,6 @@ export default function App() {
           }
         } catch(_) {}
       }
-
       triggerDownload(decrypted, decryptFile.name.replace(".secura", ""));
       pushToast("Data restored", "success");
       setDecryptFile(null);
@@ -181,8 +177,6 @@ export default function App() {
     }
   }
 
-  // --- Effects ---
-
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     const savedTheme = localStorage.getItem(THEME_KEY) || "light";
@@ -208,8 +202,6 @@ export default function App() {
     localStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.theme = (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : theme;
   }, [theme]);
-
-  // --- Shared Components ---
 
   function SecurityVaultModal() {
     if (!vaultOpen) return null;
@@ -240,7 +232,12 @@ export default function App() {
     );
   }
 
-  // --- Final Render ---
+  const team = [
+    { name: "Umang Gupta", role: "Lead & System Architecture Designer", focus: "System Design & Architecture" },
+    { name: "Tribhuvan Pratap Singh", role: "UI Design & Frontend", focus: "Frontend & Interactivity" },
+    { name: "Vineet Vikram Rao", role: "Cloud & User Management", focus: "User Auth & Cloud" },
+    { name: "Vaishnavendra & Vipul", role: "Documentation & Testing", focus: "QA & Documentation" }
+  ];
 
   if (appStage === STAGE.SPLASH) {
     return <div className="splash"><img src="/brand_logo.png" width="120" alt="Logo" /><h1 className="splash-title">Secura</h1></div>;
@@ -257,7 +254,6 @@ export default function App() {
             <img src="/brand_logo.png" width="80" alt="Secura" style={{ alignSelf: "center" }} />
             <h1 className="headline-hero">Private Vault</h1>
             <p className="description-text">Professional local-first encryption sandbox. No account required for web usage.</p>
-            
             {state.loading ? (
               <div className="hero-card" style={{ padding: 40 }}><div className="item-icon-box" style={{ margin: "0 auto", animation: "pulse 1.5s infinite" }}><Icon name="lock" /></div><p style={{ fontWeight: 800, marginTop: 12 }}>Initializing Sandbox...</p></div>
             ) : (
@@ -285,7 +281,6 @@ export default function App() {
                   <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setActiveTab("vault"); setVaultView("notes"); }}><Icon name="notes" size={20} /> Notes</button>
                 </div>
               </div>
-
               <div className="section-meta"><span className="label-caps">Recent Activity</span></div>
               <div className="list-stack">
                 {recent.length === 0 ? <div style={{ textAlign: "center", padding: 40, opacity: 0.3 }}><Icon name="info" size={48} /><p style={{ fontWeight: 700, marginTop: 12 }}>No Recent Activity</p></div> : 
@@ -303,12 +298,11 @@ export default function App() {
           {activeTab === "vault" && (
             <>
               <div className="section-meta" style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
-                <div className="theme-selector-app" style={{ display: "flex", background: "var(--card-bg)", padding: 4, borderRadius: 12, border: "1px solid var(--border)", width: '100%' }}>
+                <div className="theme-selector-app" style={{ display: "flex", background: "rgba(0,0,0,0.05)", padding: 4, borderRadius: 12, border: "1px solid var(--border)", width: '100%' }}>
                   <button className={`vault-toggle ${vaultView === 'files' ? 'active' : ''}`} onClick={() => setVaultView('files')}>Files</button>
                   <button className={`vault-toggle ${vaultView === 'notes' ? 'active' : ''}`} onClick={() => setVaultView('notes')}>Notes</button>
                 </div>
               </div>
-
               {vaultView === 'files' ? (
                 <>
                   <div className={`dropzone ${isDragActive ? 'active' : ''}`} onDragOver={e => { e.preventDefault(); setIsDragActive(true); }} onDragLeave={() => setIsDragActive(false)} onDrop={e => { e.preventDefault(); setIsDragActive(false); const f = e.dataTransfer.files[0]; if(f) openVault('encrypt', f); }} onClick={() => document.getElementById('enc-in').click()}>
@@ -342,11 +336,10 @@ export default function App() {
                   </div>
                 </>
               )}
-
               {decryptedNotePreview && (
                 <div className="hero-card panel-animate" style={{ marginTop: 24, textAlign: "left", alignItems: "flex-start", border: "2px solid var(--primary)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}><h3 className="item-title">Restored Preview</h3><button onClick={() => setDecryptedNotePreview(null)} style={{ border: 'none', background: 'none', fontWeight: 900, color: 'var(--primary)', cursor: 'pointer' }}>CLOSE</button></div>
-                  <div style={{ background: "var(--bg-light)", width: "100%", padding: 20, borderRadius: 16, marginTop: 12, whiteSpace: "pre-wrap", border: "1px solid var(--border)", maxHeight: 300, overflowY: "auto" }}>{decryptedNotePreview}</div>
+                  <div style={{ background: "rgba(0,0,0,0.02)", width: "100%", padding: 20, borderRadius: 16, marginTop: 12, whiteSpace: "pre-wrap", border: "1px solid var(--border)", maxHeight: 300, overflowY: "auto" }}>{decryptedNotePreview}</div>
                 </div>
               )}
             </>
@@ -355,9 +348,20 @@ export default function App() {
           {activeTab === "settings" && (
             <>
               <div className="section-meta"><span className="label-caps">Configuration</span></div>
-              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}><h3 className="item-title">Appearance</h3><div className="theme-selector-app" style={{ display: "flex", gap: 8, marginTop: 16, background: "rgba(0,0,0,0.05)", padding: 6, borderRadius: 14 }}>{themeOptions.map(opt => (<button key={opt} className={`theme-btn ${theme === opt ? 'active' : ''}`} onClick={() => setTheme(opt)}>{opt.toUpperCase()}</button>))}</div></div>
+              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                <h3 className="item-title">Appearance</h3>
+                <div className="theme-selector-app" style={{ display: "flex", gap: 8, marginTop: 16, background: "rgba(0,0,0,0.05)", padding: 6, borderRadius: 14, width: '100%' }}>
+                  {themeOptions.map(opt => (
+                    <button key={opt} className={`theme-btn ${theme === opt ? 'active' : ''}`} onClick={() => setTheme(opt)} style={{ flex: 1 }}>{opt.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
               <MobilePromoBanner />
-              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}><h3 className="item-title">Data Management</h3><button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444" }} onClick={() => { if(window.confirm("Clear all local history?")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("History cleared", "info"); } }}>Clear Local History</button></div>
+              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                <h3 className="item-title">Data Management</h3>
+                <p className="description-text">Clear your local activity history from this device.</p>
+                <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444", marginTop: 12 }} onClick={() => { if(window.confirm("Clear all local history?")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("History cleared", "info"); } }}>Clear Local History</button>
+              </div>
               <div style={{ display: 'none' }}><button onClick={signOut}>Sign Out</button></div>
             </>
           )}
@@ -365,8 +369,20 @@ export default function App() {
           {activeTab === "about" && (
             <>
               <div className="section-meta"><span className="label-caps">Engineering Team</span></div>
-              <div className="team-grid">{team.map(m => (<div key={m.name} className="team-card"><div className="team-avatar">{m.name[0]}</div><p className="team-name">{m.name}</p><span className="team-role">{m.role}</span><p className="team-focus">{m.focus}</p></div>))}</div>
-              <div className="terminal-box audit-box" style={{ marginTop: 24 }}><h3 style={{ fontSize: 16, fontWeight: 900 }}>🛡️ Security Audit</h3><p style={{ fontSize: 14, opacity: 0.8 }}>Browser-side AES-256-GCM. 100k iteration PBKDF2. No plaintext ever stored. Verified Zero-Knowledge sandbox.</p></div>
+              <div className="team-grid">
+                {team.map(m => (
+                  <div key={m.name} className="team-card">
+                    <div className="team-avatar">{m.name[0]}</div>
+                    <p className="team-name">{m.name}</p>
+                    <span className="team-role">{m.role}</span>
+                    <p className="team-focus">{m.focus}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="terminal-box audit-box" style={{ marginTop: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 900 }}>🛡️ Security Audit</h3>
+                <p style={{ fontSize: 14, opacity: 0.8, lineHeight: 1.6 }}>This project implements <strong>Zero-Knowledge Encryption</strong> via the W3C Web Crypto API. Keys are derived using <strong>PBKDF2</strong> with 100,000 iterations. Data is secured using <strong>AES-256-GCM</strong>. Your raw passwords never leave your browser memory.</p>
+              </div>
             </>
           )}
 
@@ -390,7 +406,7 @@ function Icon({ name, size=24 }) {
   switch (name) {
     case "lock": return <svg {...common}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>;
     case "unlock": return <svg {...common}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></svg>;
-    case "settings": return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V12a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
+    case "settings": return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V12a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
     case "info": return <svg {...common}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>;
     case "file": return <svg {...common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>;
     case "plus": return <svg {...common}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>;
