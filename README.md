@@ -6,10 +6,6 @@
 
 ## 📸 Product Showcase
 
-| **Login & Identity** | **Secure Dashboard** |
-| :---: | :---: |
-| ![Login Screen](web/public/login%20screen.png) | ![Home Screen](web/public/home%20screen.png) |
-| *Google OAuth & Guest Auth* | *Encrypted Overview* |
 
 | **Encryption Tools** | **Secure Notes** |
 | :---: | :---: |
