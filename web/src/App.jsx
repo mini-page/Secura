@@ -100,6 +100,11 @@ export default function App() {
     setAppStage(STAGE.AUTH);
   }
 
+  const openVault = useCallback((type, payload = null) => {
+    setVaultAction({ type, payload });
+    setVaultOpen(true);
+  }, []);
+
   async function processVault() {
     if (!vaultPassword) return;
     setVaultOpen(false);
@@ -203,6 +208,16 @@ export default function App() {
     document.documentElement.dataset.theme = (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : theme;
   }, [theme]);
 
+  useEffect(() => {
+    const handleGlobalDrag = (e) => e.preventDefault();
+    window.addEventListener("dragover", handleGlobalDrag);
+    window.addEventListener("drop", handleGlobalDrag);
+    return () => {
+      window.removeEventListener("dragover", handleGlobalDrag);
+      window.removeEventListener("drop", handleGlobalDrag);
+    };
+  }, []);
+
   function SecurityVaultModal() {
     if (!vaultOpen) return null;
     return (
@@ -305,7 +320,12 @@ export default function App() {
               </div>
               {vaultView === 'files' ? (
                 <>
-                  <div className={`dropzone ${isDragActive ? 'active' : ''}`} onDragOver={e => { e.preventDefault(); setIsDragActive(true); }} onDragLeave={() => setIsDragActive(false)} onDrop={e => { e.preventDefault(); setIsDragActive(false); const f = e.dataTransfer.files[0]; if(f) openVault('encrypt', f); }} onClick={() => document.getElementById('enc-in').click()}>
+                  <div className={`dropzone ${isDragActive ? 'active' : ''}`} 
+                    onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }} 
+                    onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }}
+                    onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); }} 
+                    onDrop={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); const f = e.dataTransfer.files[0]; if(f) openVault('encrypt', f); }} 
+                    onClick={() => document.getElementById('enc-in').click()}>
                     <div className="item-icon-box" style={{ width: 80, height: 80, borderRadius: 20 }}><Icon name="lock" size={40} /></div>
                     <h2 className="headline-hero" style={{ fontSize: 24 }}>Encrypt File</h2>
                     <p className="description-text">Local AES-256-GCM Protection.</p>

@@ -272,6 +272,10 @@ body {
   transform: scale(1.02);
 }
 
+.dropzone > * {
+  pointer-events: none;
+}
+
 .primary-btn {
   background: var(--primary);
   color: white;
