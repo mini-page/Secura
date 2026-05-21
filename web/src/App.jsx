@@ -47,6 +47,9 @@ export default function App() {
   const [cryptoLogs, setCryptoLogs] = useState([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [decryptedNotePreview, setDecryptedNotePreview] = useState(null);
+  const [showVaultPassword, setShowVaultPassword] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [stagedFile, setStagedFile] = useState(null);
 
   const [noteText, setNoteText] = useState("");
   const [isNoteProcessing, setIsNoteProcessing] = useState(false);
@@ -226,9 +229,28 @@ export default function App() {
           <div className="item-icon-box" style={{ margin: "0 auto 16px", background: "var(--primary)", color: "white" }}><Icon name="lock" size={32} /></div>
           <h2 className="item-title" style={{ textAlign: "center" }}>Security Vault</h2>
           <p className="description-text" style={{ textAlign: "center", marginBottom: 24 }}>Enter your vault password to continue.</p>
-          <input type="password" className="note-input-area" style={{ textAlign: "center", fontSize: 20, letterSpacing: 4, height: 60 }} placeholder="••••••••" value={vaultPassword} onChange={e => setVaultPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && processVault()} autoFocus />
+          
+          <div style={{ position: 'relative', width: '100%' }}>
+            <input 
+              type={showVaultPassword ? "text" : "password"} 
+              className="note-input-area" 
+              style={{ textAlign: "center", fontSize: 20, letterSpacing: showVaultPassword ? 0 : 4, height: 60, paddingRight: 50 }} 
+              placeholder="••••••••" 
+              value={vaultPassword} 
+              onChange={e => setVaultPassword(e.target.value)} 
+              onKeyDown={e => e.key === 'Enter' && processVault()} 
+              autoFocus 
+            />
+            <button 
+              onClick={() => setShowVaultPassword(!showVaultPassword)} 
+              style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted-light)', cursor: 'pointer', padding: 8 }}
+            >
+              <Icon name={showVaultPassword ? "eye-off" : "eye"} size={20} />
+            </button>
+          </div>
+
           <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
-            <button className="secondary-btn" style={{ flex: 1 }} onClick={() => setVaultOpen(false)}>Cancel</button>
+            <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setVaultOpen(false); setShowVaultPassword(false); }}>Cancel</button>
             <button className="primary-btn" style={{ flex: 2 }} onClick={processVault}>Confirm</button>
           </div>
           <p style={{ fontSize: 11, color: "#ef4444", fontWeight: 800, marginTop: 20, textAlign: "center" }}>⚠️ No password recovery possible in Zero-Knowledge mode.</p>
@@ -284,7 +306,15 @@ export default function App() {
 
       {appStage === STAGE.DASHBOARD && (
         <div className="page enter-animation">
-          <div className="app-header" style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}><img src="/brand_logo.png" width="40" style={{ marginRight: 10 }} /><h1>Secura</h1></div>
+          <div className="app-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <img src="/brand_logo.png" width="40" style={{ marginRight: 10 }} />
+              <h1>Secura</h1>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', padding: '4px 12px', borderRadius: 99, marginTop: 8, fontSize: 11, fontWeight: 800, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+              <Icon name="shield" size={12} /> Local Secure Sandbox
+            </div>
+          </div>
 
           {activeTab === "home" && (
             <>
@@ -296,16 +326,19 @@ export default function App() {
                   <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setActiveTab("vault"); setVaultView("notes"); }}><Icon name="notes" size={20} /> Notes</button>
                 </div>
               </div>
-              <div className="section-meta"><span className="label-caps">Recent Activity</span></div>
-              <div className="list-stack">
-                {recent.length === 0 ? <div style={{ textAlign: "center", padding: 40, opacity: 0.3 }}><Icon name="info" size={48} /><p style={{ fontWeight: 700, marginTop: 12 }}>No Recent Activity</p></div> : 
+              <div className="section-meta"><span className="label-caps">Activity History</span></div>
+              <div className="simple-log-container">
+                {recent.length === 0 ? (
+                  <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center', margin: 0 }}>No recent vault activity recorded.</p>
+                ) : (
                   recent.map(item => (
-                    <div key={item.fileId || item.id} className="item-card">
-                       <div className="item-icon-box"><Icon name={item.isNote ? "notes" : "file"} /></div>
-                       <div className="item-body"><p className="item-title">{item.originalName || item.title}</p><p className="item-subtitle">{item.isNote ? "Secure Note" : `${(item.sizeBytes / 1024).toFixed(1)} KB`} • {new Date(item.createdAt).toLocaleDateString()}</p></div>
+                    <div key={item.fileId || item.id} className="simple-log-entry">
+                       <span className="log-time">[{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' })}]</span>
+                       <span className="log-action">{item.isNote ? "Secured Note:" : "Encrypted File:"}</span>
+                       <span className="log-file">{item.originalName || item.title}</span>
                     </div>
                   ))
-                }
+                )}
               </div>
             </>
           )}
@@ -320,17 +353,36 @@ export default function App() {
               </div>
               {vaultView === 'files' ? (
                 <>
-                  <div className={`dropzone ${isDragActive ? 'active' : ''}`} 
-                    onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }} 
-                    onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }}
-                    onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); }} 
-                    onDrop={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); const f = e.dataTransfer.files[0]; if(f) openVault('encrypt', f); }} 
-                    onClick={() => document.getElementById('enc-in').click()}>
-                    <div className="item-icon-box" style={{ width: 80, height: 80, borderRadius: 20 }}><Icon name="lock" size={40} /></div>
-                    <h2 className="headline-hero" style={{ fontSize: 24 }}>Encrypt File</h2>
-                    <p className="description-text">Local AES-256-GCM Protection.</p>
-                    <input id="enc-in" type="file" onChange={e => openVault('encrypt', e.target.files[0])} style={{ display: "none" }} />
-                  </div>
+                  {!stagedFile ? (
+                    <div className={`dropzone ${isDragActive ? 'active' : ''}`} 
+                      onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }} 
+                      onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }}
+                      onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); }} 
+                      onDrop={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); const f = e.dataTransfer.files[0]; if(f) setStagedFile(f); }} 
+                      onClick={() => document.getElementById('enc-in').click()}>
+                      <div className="item-icon-box" style={{ width: 80, height: 80, borderRadius: 20, transition: 'all 0.3s ease', transform: isDragActive ? 'scale(1.1) rotate(10deg)' : 'scale(1)' }}><Icon name={isDragActive ? "unlock" : "lock"} size={40} /></div>
+                      <h2 className="headline-hero" style={{ fontSize: 24 }}>{isDragActive ? "Release to Stage" : "Encrypt File"}</h2>
+                      <p className="description-text">{isDragActive ? "Drop your file anywhere" : "Local AES-256-GCM Protection."}</p>
+                      <input id="enc-in" type="file" onChange={e => setStagedFile(e.target.files[0])} style={{ display: "none" }} />
+                    </div>
+                  ) : (
+                    <div className="hero-card panel-animate" style={{ border: '2px solid var(--primary)', textAlign: 'left', alignItems: 'flex-start' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                        <span className="label-caps" style={{ color: 'var(--primary)' }}>File Staged for Encryption</span>
+                        <button onClick={() => setStagedFile(null)} style={{ border: 'none', background: 'none', fontWeight: 900, color: 'var(--text-muted-light)', cursor: 'pointer' }}>CANCEL</button>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16, margin: '20px 0', width: '100%' }}>
+                        <div className="activity-icon" style={{ width: 50, height: 50, borderRadius: 14 }}><Icon name="file" size={24} /></div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p className="activity-name" style={{ fontSize: 16 }}>{stagedFile.name}</p>
+                          <p className="description-text" style={{ margin: 0 }}>{(stagedFile.size / 1024).toFixed(1)} KB • Ready to secure</p>
+                        </div>
+                      </div>
+                      <button className="primary-btn" onClick={() => { openVault('encrypt', stagedFile); setStagedFile(null); }}>
+                        <Icon name="lock" size={18} /> Secure This File
+                      </button>
+                    </div>
+                  )}
                   <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", padding: 32, marginTop: 24 }}>
                     <h3 className="item-title">Decrypt & Restore</h3>
                     <p className="description-text">Select a .secura container to recover data.</p>
@@ -344,8 +396,11 @@ export default function App() {
                 <>
                   <div className="hero-card" style={{ alignItems: "stretch", textAlign: "left" }}>
                     <h3 className="item-title">Secure Notepad</h3>
-                    <textarea className="note-input-area" style={{ minHeight: 200 }} placeholder="Your data is encrypted in-browser..." value={noteText} onChange={e => setNoteText(e.target.value)} />
-                    <button className="primary-btn" style={{ marginTop: 12 }} disabled={isNoteProcessing || !noteText.trim()} onClick={() => openVault('note')}>{isNoteProcessing ? "Securing..." : "Encrypt & Download Note"}</button>
+                    <textarea className="note-input-area" style={{ minHeight: 200, fontFamily: "'Space Mono', monospace" }} placeholder="Your data is encrypted in-browser..." value={noteText} onChange={e => setNoteText(e.target.value)} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                      <span style={{ fontSize: 11, fontWeight: 800, opacity: 0.6, color: noteText.length > 5000 ? '#ef4444' : 'inherit' }}>{noteText.length.toLocaleString()} characters</span>
+                      <button className="primary-btn" style={{ width: 'auto', padding: '12px 24px' }} disabled={isNoteProcessing || !noteText.trim()} onClick={() => openVault('note')}>{isNoteProcessing ? "Securing..." : "Encrypt & Download"}</button>
+                    </div>
                   </div>
                   <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start", padding: 32, marginTop: 24 }}>
                     <h3 className="item-title">Decrypt Note</h3>
@@ -358,8 +413,19 @@ export default function App() {
               )}
               {decryptedNotePreview && (
                 <div className="hero-card panel-animate" style={{ marginTop: 24, textAlign: "left", alignItems: "flex-start", border: "2px solid var(--primary)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}><h3 className="item-title">Restored Preview</h3><button onClick={() => setDecryptedNotePreview(null)} style={{ border: 'none', background: 'none', fontWeight: 900, color: 'var(--primary)', cursor: 'pointer' }}>CLOSE</button></div>
-                  <div style={{ background: "rgba(0,0,0,0.02)", width: "100%", padding: 20, borderRadius: 16, marginTop: 12, whiteSpace: "pre-wrap", border: "1px solid var(--border)", maxHeight: 300, overflowY: "auto" }}>{decryptedNotePreview}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: 'center' }}>
+                    <h3 className="item-title">Restored Preview</h3>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button 
+                        onClick={() => { navigator.clipboard.writeText(decryptedNotePreview); setIsCopied(true); setTimeout(() => setIsCopied(false), 2000); }} 
+                        style={{ border: 'none', background: 'rgba(87, 89, 146, 0.1)', borderRadius: 8, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, color: 'var(--primary)', cursor: 'pointer' }}
+                      >
+                        <Icon name={isCopied ? "check" : "copy"} size={14} /> {isCopied ? "COPIED" : "COPY"}
+                      </button>
+                      <button onClick={() => setDecryptedNotePreview(null)} style={{ border: 'none', background: 'none', fontWeight: 900, color: 'var(--primary)', cursor: 'pointer', padding: 8 }}>CLOSE</button>
+                    </div>
+                  </div>
+                  <div style={{ background: "rgba(0,0,0,0.02)", width: "100%", padding: 20, borderRadius: 16, marginTop: 12, whiteSpace: "pre-wrap", border: "1px solid var(--border)", maxHeight: 300, overflowY: "auto", fontFamily: "'Space Mono', monospace", fontSize: 14 }}>{decryptedNotePreview}</div>
                 </div>
               )}
             </>
@@ -433,6 +499,11 @@ function Icon({ name, size=24 }) {
     case "notes": return <svg {...common}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>;
     case "home": return <svg {...common}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>;
     case "terminal": return <svg {...common}><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>;
+    case "eye": return <svg {...common}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>;
+    case "eye-off": return <svg {...common}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
+    case "copy": return <svg {...common}><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;
+    case "shield": return <svg {...common}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>;
+    case "check": return <svg {...common}><polyline points="20 6 9 17 4 12" /></svg>;
     default: return null;
   }
 }
