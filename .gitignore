@@ -29,10 +29,16 @@ server_django/storage/
 .claude/
 .gemini/
 .agents/
+conductor/
 BLACKBOX.md
 CLAUDE.md
 GEMINI.md
 MEMORY.md
+PLAN.md
+RESEARCH.md
+VERIFICATION.md
+UI-SPEC.md
+UI-REVIEW.md
 .cursorrules
 *.log
 npm-debug.log*
