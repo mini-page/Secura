@@ -49,7 +49,14 @@ export default function App() {
   const [decryptedNotePreview, setDecryptedNotePreview] = useState(null);
   const [showVaultPassword, setShowVaultPassword] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-  const [stagedFile, setStagedFile] = useState(null);
+  const [stagedFiles, setStagedFiles] = useState([]);
+  const [sessionPassword, setSessionPassword] = useState(sessionStorage.getItem("secura_session_key") || "");
+  const [rememberSession, setRememberSession] = useState(false);
+  const [noteTitle, setNoteTitle] = useState("");
+
+  const [configBatch, setConfigBatch] = useState(localStorage.getItem("secura_cfg_batch") !== "0");
+  const [configNoteTitles, setConfigNoteTitles] = useState(localStorage.getItem("secura_cfg_titles") !== "0");
+  const [configSessionKey, setConfigSessionKey] = useState(localStorage.getItem("secura_cfg_session") !== "0");
 
   const [noteText, setNoteText] = useState("");
   const [isNoteProcessing, setIsNoteProcessing] = useState(false);
@@ -104,13 +111,25 @@ export default function App() {
   }
 
   const openVault = useCallback((type, payload = null) => {
+    if (configSessionKey && sessionPassword) {
+      if (type === 'encrypt') handleEncrypt(payload, sessionPassword);
+      if (type === 'decrypt') handleDecrypt(sessionPassword);
+      if (type === 'note') handleSaveNote(sessionPassword);
+      return;
+    }
     setVaultAction({ type, payload });
     setVaultOpen(true);
-  }, []);
+  }, [sessionPassword, configSessionKey]);
 
   async function processVault() {
     if (!vaultPassword) return;
     setVaultOpen(false);
+    
+    if (rememberSession) {
+      setSessionPassword(vaultPassword);
+      sessionStorage.setItem("secura_session_key", vaultPassword);
+    }
+
     const { type, payload } = vaultAction;
     if (type === 'encrypt') await handleEncrypt(payload, vaultPassword);
     if (type === 'decrypt') await handleDecrypt(vaultPassword);
@@ -118,16 +137,22 @@ export default function App() {
     setVaultPassword("");
   }
 
-  async function handleEncrypt(file, password) {
-    if (!file) return;
+  async function handleEncrypt(files, password) {
+    if (!files || (Array.isArray(files) && files.length === 0)) return;
     setIsProcessing(true);
+    const fileList = Array.isArray(files) ? files : [files];
+    
     try {
-      const buffer = await file.arrayBuffer();
-      const encrypted = await encryptBuffer(buffer, password);
-      triggerDownload(encrypted, `${file.name}.secura`);
-      pushToast("File secured & downloaded", "success");
-      const newFile = { fileId: Date.now().toString(), originalName: file.name, sizeBytes: buffer.byteLength, createdAt: new Date().toISOString() };
-      const updated = [newFile, ...state.files].slice(0, 10);
+      const newHistoryItems = [];
+      for (const file of fileList) {
+        const buffer = await file.arrayBuffer();
+        const encrypted = await encryptBuffer(buffer, password);
+        triggerDownload(encrypted, `${file.name}.secura`);
+        newHistoryItems.push({ fileId: (Date.now() + Math.random()).toString(), originalName: file.name, sizeBytes: buffer.byteLength, createdAt: new Date().toISOString() });
+      }
+      
+      pushToast(`${fileList.length} file${fileList.length > 1 ? 's' : ''} secured`, "success");
+      const updated = [...newHistoryItems, ...state.files].slice(0, 10);
       setState(s => ({ ...s, files: updated }));
       localStorage.setItem(LOCAL_FILES_KEY, JSON.stringify(updated));
     } catch (err) {
@@ -170,13 +195,15 @@ export default function App() {
     try {
       const encoded = new TextEncoder().encode(noteText);
       const encrypted = await encryptBuffer(encoded, password);
-      const baseName = `SecuraNote_${Date.now()}`;
+      const useTitle = configNoteTitles && noteTitle.trim();
+      const baseName = useTitle ? noteTitle.trim().replace(/[^a-z0-9]/gi, '_') : `SecuraNote_${Date.now()}`;
       triggerDownload(encrypted, `${baseName}.secura`);
       const newNote = { id: Date.now().toString(), title: baseName, createdAt: new Date().toISOString() };
       const updated = [newNote, ...state.notes].slice(0, 10);
       setState(s => ({ ...s, notes: updated }));
       localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(updated));
       setNoteText("");
+      setNoteTitle("");
       pushToast("Note secured", "success");
     } catch (err) {
       pushToast("Vault error", "error");
@@ -250,9 +277,22 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
-            <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setVaultOpen(false); setShowVaultPassword(false); }}>Cancel</button>
+            <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setVaultOpen(false); setShowVaultPassword(false); setRememberSession(false); }}>Cancel</button>
             <button className="primary-btn" style={{ flex: 2 }} onClick={processVault}>Confirm</button>
           </div>
+          
+          {configSessionKey && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 20, cursor: 'pointer', alignSelf: 'center' }}>
+              <input 
+                type="checkbox" 
+                checked={rememberSession} 
+                onChange={e => setRememberSession(e.target.checked)} 
+                style={{ width: 18, height: 18, accentColor: 'var(--primary)' }} 
+              />
+              <span style={{ fontSize: 13, fontWeight: 700, opacity: 0.8 }}>Remember for this session</span>
+            </label>
+          )}
+
           <p style={{ fontSize: 11, color: "#ef4444", fontWeight: 800, marginTop: 20, textAlign: "center" }}>⚠️ No password recovery possible in Zero-Knowledge mode.</p>
         </div>
       </div>
@@ -353,33 +393,37 @@ export default function App() {
               </div>
               {vaultView === 'files' ? (
                 <>
-                  {!stagedFile ? (
+                  {!stagedFiles.length ? (
                     <div className={`dropzone ${isDragActive ? 'active' : ''}`} 
                       onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }} 
                       onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }}
                       onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); }} 
-                      onDrop={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); const f = e.dataTransfer.files[0]; if(f) setStagedFile(f); }} 
+                      onDrop={e => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); let files = Array.from(e.dataTransfer.files); if(!configBatch) files = files.slice(0, 1); if(files.length) setStagedFiles(files); }} 
                       onClick={() => document.getElementById('enc-in').click()}>
                       <div className="item-icon-box" style={{ width: 80, height: 80, borderRadius: 20, transition: 'all 0.3s ease', transform: isDragActive ? 'scale(1.1) rotate(10deg)' : 'scale(1)' }}><Icon name={isDragActive ? "unlock" : "lock"} size={40} /></div>
-                      <h2 className="headline-hero" style={{ fontSize: 24 }}>{isDragActive ? "Release to Stage" : "Encrypt File"}</h2>
-                      <p className="description-text">{isDragActive ? "Drop your file anywhere" : "Local AES-256-GCM Protection."}</p>
-                      <input id="enc-in" type="file" onChange={e => setStagedFile(e.target.files[0])} style={{ display: "none" }} />
+                      <h2 className="headline-hero" style={{ fontSize: 24 }}>{isDragActive ? "Release to Stage" : "Encrypt Files"}</h2>
+                      <p className="description-text">{isDragActive ? "Drop your files anywhere" : "Local AES-256-GCM Protection."}</p>
+                      <input id="enc-in" type="file" multiple={configBatch} onChange={e => { let files = Array.from(e.target.files); if(!configBatch) files = files.slice(0, 1); setStagedFiles(files); }} style={{ display: "none" }} />
                     </div>
                   ) : (
                     <div className="hero-card panel-animate" style={{ border: '2px solid var(--primary)', textAlign: 'left', alignItems: 'flex-start' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                        <span className="label-caps" style={{ color: 'var(--primary)' }}>File Staged for Encryption</span>
-                        <button onClick={() => setStagedFile(null)} style={{ border: 'none', background: 'none', fontWeight: 900, color: 'var(--text-muted-light)', cursor: 'pointer' }}>CANCEL</button>
+                        <span className="label-caps" style={{ color: 'var(--primary)' }}>{stagedFiles.length} File{stagedFiles.length > 1 ? 's' : ''} Staged for Encryption</span>
+                        <button onClick={() => setStagedFiles([])} style={{ border: 'none', background: 'none', fontWeight: 900, color: 'var(--text-muted-light)', cursor: 'pointer' }}>CANCEL</button>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16, margin: '20px 0', width: '100%' }}>
-                        <div className="activity-icon" style={{ width: 50, height: 50, borderRadius: 14 }}><Icon name="file" size={24} /></div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <p className="activity-name" style={{ fontSize: 16 }}>{stagedFile.name}</p>
-                          <p className="description-text" style={{ margin: 0 }}>{(stagedFile.size / 1024).toFixed(1)} KB • Ready to secure</p>
-                        </div>
+                      <div style={{ margin: '20px 0', width: '100%', maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {stagedFiles.map((f, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(0,0,0,0.02)', padding: 12, borderRadius: 12 }}>
+                            <Icon name="file" size={16} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ margin: 0, fontSize: 13, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</p>
+                              <p style={{ margin: 0, fontSize: 11, opacity: 0.6 }}>{(f.size / 1024).toFixed(1)} KB</p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <button className="primary-btn" onClick={() => { openVault('encrypt', stagedFile); setStagedFile(null); }}>
-                        <Icon name="lock" size={18} /> Secure This File
+                      <button className="primary-btn" onClick={() => { openVault('encrypt', stagedFiles); setStagedFiles([]); }}>
+                        <Icon name="lock" size={18} /> Secure All Files
                       </button>
                     </div>
                   )}
@@ -396,6 +440,16 @@ export default function App() {
                 <>
                   <div className="hero-card" style={{ alignItems: "stretch", textAlign: "left" }}>
                     <h3 className="item-title">Secure Notepad</h3>
+                    {configNoteTitles && (
+                      <input 
+                        type="text" 
+                        className="note-input-area" 
+                        style={{ minHeight: 50, marginBottom: 12, fontWeight: 900, fontSize: 18, borderBottomWidth: 2 }} 
+                        placeholder="Note Title (Optional)" 
+                        value={noteTitle} 
+                        onChange={e => setNoteTitle(e.target.value)} 
+                      />
+                    )}
                     <textarea className="note-input-area" style={{ minHeight: 200, fontFamily: "'Space Mono', monospace" }} placeholder="Your data is encrypted in-browser..." value={noteText} onChange={e => setNoteText(e.target.value)} />
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
                       <span style={{ fontSize: 11, fontWeight: 800, opacity: 0.6, color: noteText.length > 5000 ? '#ef4444' : 'inherit' }}>{noteText.length.toLocaleString()} characters</span>
@@ -444,9 +498,38 @@ export default function App() {
               </div>
               <MobilePromoBanner />
               <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
+                <h3 className="item-title">Advanced</h3>
+                <p className="description-text" style={{ marginBottom: 16 }}>Configure experimental and workflow features.</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%' }}>
+                  {[
+                    { id: 'batch', label: 'Multi-File Batch Mode', desc: 'Secure multiple files in one pass.', state: configBatch, setter: setConfigBatch, key: 'secura_cfg_batch' },
+                    { id: 'titles', label: 'Custom Note Titles', desc: 'Give your secured notes descriptive names.', state: configNoteTitles, setter: setConfigNoteTitles, key: 'secura_cfg_titles' },
+                    { id: 'session', label: 'Master Password Mode', desc: 'Hold key in memory for current session.', state: configSessionKey, setter: setConfigSessionKey, key: 'secura_cfg_session' }
+                  ].map(cfg => (
+                    <div key={cfg.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 900 }}>{cfg.label}</p>
+                        <p style={{ margin: 0, fontSize: 11, opacity: 0.6 }}>{cfg.desc}</p>
+                      </div>
+                      <div 
+                        onClick={() => { const next = !cfg.state; cfg.setter(next); localStorage.setItem(cfg.key, next ? "1" : "0"); }}
+                        style={{ width: 44, height: 24, background: cfg.state ? 'var(--primary)' : 'rgba(0,0,0,0.1)', borderRadius: 20, position: 'relative', cursor: 'pointer', transition: 'all 0.2s' }}
+                      >
+                        <div style={{ position: 'absolute', top: 3, left: cfg.state ? 23 : 3, width: 18, height: 18, background: 'white', borderRadius: '50%', transition: 'all 0.2s ease' }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="hero-card" style={{ textAlign: "left", alignItems: "flex-start" }}>
                 <h3 className="item-title">Data Management</h3>
-                <p className="description-text">Clear your local activity history from this device.</p>
-                <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444", marginTop: 12 }} onClick={() => { if(window.confirm("Clear all local history?")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("History cleared", "info"); } }}>Clear Local History</button>
+                <p className="description-text">Clear your local activity history or active session keys.</p>
+                <div style={{ display: 'flex', gap: 12, width: '100%', marginTop: 12 }}>
+                  <button className="secondary-btn" style={{ color: "#ef4444", borderColor: "#ef4444", flex: 1 }} onClick={() => { if(window.confirm("Clear all local history?")) { localStorage.removeItem(LOCAL_FILES_KEY); localStorage.removeItem(LOCAL_NOTES_KEY); setState(s => ({ ...s, files: [], notes: [] })); pushToast("History cleared", "info"); } }}>Clear History</button>
+                  {sessionPassword && (
+                    <button className="secondary-btn" style={{ flex: 1 }} onClick={() => { setSessionPassword(""); sessionStorage.removeItem("secura_session_key"); pushToast("Session key cleared", "info"); }}>Clear Session Key</button>
+                  )}
+                </div>
               </div>
               <div style={{ display: 'none' }}><button onClick={signOut}>Sign Out</button></div>
             </>

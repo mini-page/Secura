@@ -1,11 +1,12 @@
 {
-  "name": "Secura Web",
+  "name": "Secura Web Vault",
   "short_name": "Secura",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0c3cff",
-  "description": "Secure browser-based file vault with local AES-256 encryption.",
+  "background_color": "#F4F6FA",
+  "theme_color": "#575992",
+  "description": "Zero-Knowledge local AES-256 encryption sandbox for files and notes.",
+  "categories": ["security", "productivity", "utilities"],
   "icons": [
     {
       "src": "/brand_logo.png",
@@ -18,6 +19,18 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Secure Note",
+      "url": "/?tab=vault&view=notes",
+      "icons": [{ "src": "/brand_logo.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Encrypt Files",
+      "url": "/?tab=vault&view=files",
+      "icons": [{ "src": "/brand_logo.png", "sizes": "192x192" }]
     }
   ]
 }
